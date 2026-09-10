@@ -1,5 +1,4 @@
 const express = require('express');
-const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 require('dotenv').config();
@@ -7,20 +6,12 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
-app.use(session({
-    secret: process.env.SESSION_SECRET || 'mannieng_secret_key',
-    resave: false,
-    saveUninitialized: true,
-    cookie: { secure: process.env.NODE_ENV === 'production' }
-}));
 
-// In-memory database (replace with MongoDB/PostgreSQL for production)
+// In-memory storage (swap for MongoDB/Postgres in production)
 const users = [];
-const tasks = [];
 const taskProgress = [];
 
 // Sample tasks for Nigerian users
@@ -72,45 +63,31 @@ const sampleTasks = [
     }
 ];
 
-// Routes
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
+// ---------- Pages ----------
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'public', 'dashboard.html')));
+app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
+app.get('/register', (req, res) => res.sendFile(path.join(__dirname, 'public', 'register.html')));
 
-app.get('/dashboard', (req, res) => {
-    if (!req.session.userId) {
-        return res.redirect('/login');
-    }
-    res.sendFile(path.join(__dirname, 'dashboard.html'));
-});
-
-app.get('/login', (req, res) => {
-    res.sendFile(path.join(__dirname, 'login.html'));
-});
-
-app.get('/register', (req, res) => {
-    res.sendFile(path.join(__dirname,'register.html'));
-});
-
-// API Routes
+// ---------- Auth ----------
 app.post('/api/register', async (req, res) => {
     const { username, email, password, phone } = req.body;
-    
-    // Validate Nigerian phone number
+
+    if (!username || !email || !password || !phone) {
+        return res.status(400).json({ error: 'All fields are required' });
+    }
+
     const phoneRegex = /^(\+234|0)[789][01]\d{8}$/;
     if (!phoneRegex.test(phone)) {
         return res.status(400).json({ error: 'Invalid Nigerian phone number' });
     }
 
-    // Check if user exists
     if (users.find(u => u.email === email || u.username === username)) {
         return res.status(400).json({ error: 'User already exists' });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-    
-    // Create user
+
     const user = {
         id: users.length + 1,
         username,
@@ -122,169 +99,102 @@ app.post('/api/register', async (req, res) => {
         referralCode: `MNG${Date.now().toString(36).toUpperCase()}`,
         createdAt: new Date().toISOString()
     };
-    
+
     users.push(user);
-    
-    // Initialize task progress for user
+
     sampleTasks.forEach(task => {
         taskProgress.push({
             userId: user.id,
             taskId: task.id,
             completed: false,
-            startedAt: null,
             completedAt: null
         });
     });
-    
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    
-    res.status(201).json({ 
-        message: 'Registration successful!', 
-        user: { 
-            id: user.id, 
-            username: user.username, 
-            email: user.email,
-            referralCode: user.referralCode 
-        } 
-    });
+
+    const { password: _, ...safeUser } = user;
+    res.status(201).json({ message: 'Registration successful!', user: safeUser });
 });
 
 app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
-    
+
     const user = users.find(u => u.email === email);
-    if (!user) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    
-    const validPassword = await bcrypt.compare(password, user.password);
-    if (!validPassword) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-    }
-    
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    
-    res.json({ 
-        message: 'Login successful!', 
-        user: { 
-            id: user.id, 
-            username: user.username, 
-            email: user.email,
-            balance: user.balance,
-            referralCode: user.referralCode
-        } 
-    });
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const { password: _, ...safeUser } = user;
+    res.json({ message: 'Login successful!', user: safeUser });
 });
 
-app.post('/api/logout', (req, res) => {
-    req.session.destroy();
-    res.json({ message: 'Logged out successfully' });
+// ---------- User ----------
+app.get('/api/user/:id', (req, res) => {
+    const user = users.find(u => u.id === parseInt(req.params.id));
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const { password, ...safeUser } = user;
+    res.json(safeUser);
 });
 
-app.get('/api/tasks', (req, res) => {
-    if (!req.session.userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    const userId = req.session.userId;
-    const userTasks = taskProgress.filter(tp => tp.userId === userId);
-    
+// ---------- Tasks ----------
+app.get('/api/tasks/:userId', (req, res) => {
+    const userId = parseInt(req.params.userId);
+    const user = users.find(u => u.id === userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
     const tasksWithStatus = sampleTasks.map(task => {
-        const progress = userTasks.find(tp => tp.taskId === task.id);
-        return {
-            ...task,
-            completed: progress ? progress.completed : false,
-            progress: progress || null
-        };
+        const progress = taskProgress.find(tp => tp.userId === userId && tp.taskId === task.id);
+        return { ...task, completed: progress ? progress.completed : false };
     });
-    
+
     res.json(tasksWithStatus);
 });
 
-app.post('/api/tasks/:taskId/complete', (req, res) => {
-    if (!req.session.userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    const userId = req.session.userId;
-    const taskId = parseInt(req.params.taskId);
-    
-    // Find task progress
+app.post('/api/tasks/complete', (req, res) => {
+    const { userId, taskId } = req.body;
+
+    const user = users.find(u => u.id === userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
     const progress = taskProgress.find(tp => tp.userId === userId && tp.taskId === taskId);
-    if (!progress) {
-        return res.status(404).json({ error: 'Task not found' });
-    }
-    
-    if (progress.completed) {
-        return res.status(400).json({ error: 'Task already completed' });
-    }
-    
-    // Find task
+    if (!progress) return res.status(404).json({ error: 'Task not found' });
+
+    if (progress.completed) return res.status(400).json({ error: 'Task already completed' });
+
     const task = sampleTasks.find(t => t.id === taskId);
-    if (!task) {
-        return res.status(404).json({ error: 'Task not found' });
-    }
-    
-    // Update progress
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+
     progress.completed = true;
     progress.completedAt = new Date().toISOString();
-    
-    // Update user balance
-    const user = users.find(u => u.id === userId);
-    if (user) {
-        user.balance += task.reward;
-        user.tasksCompleted += 1;
-    }
-    
-    res.json({ 
-        message: 'Task completed successfully!', 
+
+    user.balance += task.reward;
+    user.tasksCompleted += 1;
+
+    res.json({
+        message: 'Task completed successfully!',
         reward: task.reward,
         newBalance: user.balance
     });
 });
 
-app.get('/api/user/profile', (req, res) => {
-    if (!req.session.userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    const user = users.find(u => u.id === req.session.userId);
-    if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-    }
-    
-    const { password, ...userWithoutPassword } = user;
-    res.json(userWithoutPassword);
-});
-
+// ---------- Withdraw ----------
 app.post('/api/withdraw', (req, res) => {
-    if (!req.session.userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    const { amount, bankName, accountNumber } = req.body;
-    const user = users.find(u => u.id === req.session.userId);
-    
-    if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-    }
-    
-    if (user.balance < amount) {
-        return res.status(400).json({ error: 'Insufficient balance' });
-    }
-    
-    if (amount < 100) {
-        return res.status(400).json({ error: 'Minimum withdrawal is ₦100' });
-    }
-    
-    // Process withdrawal (in production, integrate with Flutterwave or Paystack)
+    const { userId, amount, bankName, accountNumber } = req.body;
+
+    const user = users.find(u => u.id === userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (user.balance < amount) return res.status(400).json({ error: 'Insufficient balance' });
+    if (amount < 100) return res.status(400).json({ error: 'Minimum withdrawal is ₦100' });
+    if (!/^\d{10}$/.test(accountNumber)) return res.status(400).json({ error: 'Invalid account number' });
+
+    // TODO: integrate Flutterwave / Paystack here
     user.balance -= amount;
-    
-    res.json({ 
-        message: 'Withdrawal request submitted!', 
-        amount: amount,
+
+    res.json({
+        message: 'Withdrawal request submitted!',
+        amount,
         newBalance: user.balance,
         bankName,
         accountNumber
