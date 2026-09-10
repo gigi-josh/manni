@@ -10,6 +10,10 @@ const Auth = {
             return null;
         }
     },
+    updateUser(partial) {
+        const current = this.getUser() || {};
+        this.setUser({ ...current, ...partial });
+    },
     logout() {
         localStorage.removeItem('mannieng_user');
         window.location.href = '/';
@@ -24,6 +28,9 @@ const Auth = {
     }
 };
 
+// Track active timers so we can clear them on reload
+const activeTimers = {};
+
 // ================= REGISTER =================
 async function register(event) {
     event.preventDefault();
@@ -33,10 +40,17 @@ async function register(event) {
     const phone = document.getElementById('phone').value.trim();
     const password = document.getElementById('password').value;
 
+    if (username.length < 3) {
+        return showMessage('registerMessage', 'Username must be at least 3 characters', 'error');
+    }
+
+    if (password.length < 6) {
+        return showMessage('registerMessage', 'Password must be at least 6 characters', 'error');
+    }
+
     const phoneRegex = /^(\+234|0)[789][01]\d{8}$/;
     if (!phoneRegex.test(phone)) {
-        showMessage('registerMessage', 'Enter a valid Nigerian phone number (e.g. 08012345678)', 'error');
-        return;
+        return showMessage('registerMessage', 'Enter a valid Nigerian phone number (e.g. 08012345678)', 'error');
     }
 
     try {
@@ -100,27 +114,44 @@ async function loadDashboard() {
             return;
         }
 
-        // Refresh LocalStorage with latest data
+        // Refresh LocalStorage with latest server data
         Auth.setUser(user);
 
         document.getElementById('username').textContent = user.username;
-        document.getElementById('balance').textContent = `₦${user.balance.toLocaleString()}`;
-        document.getElementById('tasksCompleted').textContent = user.tasksCompleted;
-        document.getElementById('referralCode').textContent = user.referralCode;
+        document.getElementById('balance').textContent = `₦${(user.balance || 0).toLocaleString()}`;
+        document.getElementById('tasksCompleted').textContent = user.tasksCompleted || 0;
+        document.getElementById('referralCode').textContent = user.referralCode || '-';
+
+        // Optional pending balance display
+        const pendingEl = document.getElementById('pendingBalance');
+        if (pendingEl) {
+            pendingEl.textContent = `₦${(user.pendingBalance || 0).toLocaleString()}`;
+        }
 
         loadTasks();
+        loadWithdrawalHistory();
     } catch {
         Auth.logout();
     }
 }
 
+// ================= TASKS =================
 async function loadTasks() {
     const user = Auth.getUser();
     if (!user) return;
 
+    // Clear any existing timers before re-rendering
+    Object.values(activeTimers).forEach(id => clearInterval(id));
+    Object.keys(activeTimers).forEach(k => delete activeTimers[k]);
+
     try {
         const res = await fetch(`/api/tasks/${user.id}`);
         const tasks = await res.json();
+
+        if (!res.ok) {
+            document.getElementById('tasksContainer').innerHTML = '<p>Failed to load tasks.</p>';
+            return;
+        }
 
         const container = document.getElementById('tasksContainer');
         container.innerHTML = '';
@@ -130,38 +161,93 @@ async function loadTasks() {
             return;
         }
 
-        tasks.forEach(task => {
-            const card = document.createElement('div');
-            card.className = `task-card ${task.completed ? 'completed' : ''}`;
-            card.innerHTML = `
-                <div class="task-header">
-                    <span class="task-title">${task.title}</span>
-                    <span class="task-reward">₦${task.reward}</span>
-                </div>
-                <span class="task-category">${task.category}</span>
-                <p class="task-description">${task.description}</p>
-                <small>${task.instructions}</small>
-                <div class="task-actions">
-                    ${task.link ? `<a href="${task.link}" target="_blank" class="task-link">Open Task</a>` : ''}
-                    ${!task.completed
-                        ? `<button onclick="completeTask(${task.id})" class="btn btn-success">Complete</button>`
-                        : `<span class="task-completed">✅ Completed</span>`}
-                </div>
-            `;
-            container.appendChild(card);
-        });
+        tasks.forEach(task => container.appendChild(renderTaskCard(task)));
     } catch {
         document.getElementById('tasksContainer').innerHTML = '<p>Failed to load tasks.</p>';
     }
 }
 
-async function completeTask(taskId) {
+function renderTaskCard(task) {
+    const card = document.createElement('div');
+    card.className = `task-card status-${task.status}`;
+
+    let actionHtml = '';
+
+    switch (task.status) {
+        case 'completed':
+            actionHtml = `<span class="task-completed">✅ Completed</span>`;
+            break;
+
+        case 'pending':
+            actionHtml = `<span class="task-pending">⏳ Awaiting approval</span>`;
+            break;
+
+        case 'rejected':
+            actionHtml = `
+                <div class="task-rejected-note">${task.adminNote || 'Proof insufficient'}</div>
+                <button onclick="startTask(${task.id})" class="btn btn-outline">Retry</button>
+            `;
+            break;
+
+        case 'started':
+            actionHtml = `
+                <div class="task-timer" id="timer-${task.id}">
+                    <span class="timer-label">Time on task:</span>
+                    <span class="timer-value" data-task-id="${task.id}">0s</span>
+                </div>
+                <button id="completeBtn-${task.id}"
+                        onclick="completeTask(${task.id})"
+                        class="btn btn-success"
+                        ${task.verification === 'timed' ? 'disabled' : ''}>
+                    I'm Done
+                </button>
+            `;
+            break;
+
+        default: // available
+            actionHtml = `<button onclick="startTask(${task.id})" class="btn btn-primary">Start Task</button>`;
+    }
+
+    const proofBadge = task.verification === 'proof' || task.verification === 'admin'
+        ? `<span class="badge badge-proof">Proof required</span>`
+        : task.verification === 'timed'
+            ? `<span class="badge badge-timed">⏱ ${task.minSeconds}s min</span>`
+            : '';
+
+    card.innerHTML = `
+        <div class="task-header">
+            <span class="task-title">${escapeHtml(task.title)}</span>
+            <span class="task-reward">₦${task.reward}</span>
+        </div>
+        <div class="task-meta">
+            <span class="task-category">${escapeHtml(task.category)}</span>
+            ${proofBadge}
+        </div>
+        <p class="task-description">${escapeHtml(task.description)}</p>
+        <small class="task-instructions">${escapeHtml(task.instructions)}</small>
+        <div class="task-actions">
+            ${task.link
+                ? `<a href="${escapeAttr(task.link)}" target="_blank" rel="noopener" class="task-link">Open Task</a>`
+                : ''}
+            ${actionHtml}
+        </div>
+    `;
+
+    // Start the countdown timer if task is in progress
+    if (task.status === 'started' && task.startedAt) {
+        startTimer(task.id, task.startedAt, task.minSeconds || 0, task.verification);
+    }
+
+    return card;
+}
+
+// ================= START TASK =================
+async function startTask(taskId) {
     const user = Auth.getUser();
     if (!user) return;
-    if (!confirm('Confirm you have completed this task?')) return;
 
     try {
-        const res = await fetch('/api/tasks/complete', {
+        const res = await fetch('/api/tasks/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ userId: user.id, taskId })
@@ -169,7 +255,86 @@ async function completeTask(taskId) {
         const data = await res.json();
 
         if (res.ok) {
-            alert(`✅ Task completed! You earned ₦${data.reward}`);
+            loadTasks();
+        } else {
+            alert(data.error || 'Could not start task');
+        }
+    } catch {
+        alert('Network error. Try again.');
+    }
+}
+
+// ================= TIMER =================
+function startTimer(taskId, startedAt, minSeconds, verification) {
+    const valueEl = document.querySelector(`.timer-value[data-task-id="${taskId}"]`);
+    const timerBox = document.getElementById(`timer-${taskId}`);
+    const completeBtn = document.getElementById(`completeBtn-${taskId}`);
+    if (!valueEl) return;
+
+    const tick = () => {
+        const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+        valueEl.textContent = `${elapsed}s`;
+
+        if (verification === 'timed' && elapsed >= minSeconds) {
+            if (timerBox) timerBox.classList.add('timer-ready');
+            valueEl.textContent = `✅ ${elapsed}s — ready`;
+            if (completeBtn && completeBtn.disabled) {
+                completeBtn.disabled = false;
+            }
+            clearInterval(activeTimers[taskId]);
+            delete activeTimers[taskId];
+        }
+    };
+
+    tick();
+    activeTimers[taskId] = setInterval(tick, 1000);
+}
+
+// ================= COMPLETE TASK =================
+async function completeTask(taskId) {
+    const user = Auth.getUser();
+    if (!user) return;
+
+    const task = await getTaskById(taskId);
+    if (!task) {
+        alert('Task not found');
+        return;
+    }
+
+    let proofUrl = null;
+
+    // Proof/admin tasks require proof input
+    if (task.verification === 'proof' || task.verification === 'admin') {
+        proofUrl = prompt(
+            'Paste a link to your proof (screenshot URL, post URL, etc.):\n\n' +
+            'Tip: upload your screenshot to imgur.com or drive.google.com and paste the link.'
+        );
+
+        if (!proofUrl || proofUrl.trim().length < 10) {
+            alert('You must provide proof to submit this task.');
+            return;
+        }
+        proofUrl = proofUrl.trim();
+    }
+
+    if (task.verification === 'timed') {
+        if (!confirm('Confirm you have completed this task?')) return;
+    }
+
+    try {
+        const res = await fetch('/api/tasks/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: user.id, taskId, proofUrl })
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+            if (data.pending) {
+                alert(`⏳ Submitted for review.\n₦${data.reward} will be credited after approval.`);
+            } else {
+                alert(`✅ Task completed!\nYou earned ₦${data.reward}`);
+            }
             loadDashboard();
         } else {
             alert(data.error || 'Failed to complete task');
@@ -177,6 +342,27 @@ async function completeTask(taskId) {
     } catch {
         alert('Network error. Try again.');
     }
+}
+
+// Cache tasks so completeTask doesn't re-fetch
+let taskCache = [];
+async function getTaskById(taskId) {
+    const user = Auth.getUser();
+    if (!user) return null;
+
+    // Try cache first
+    let task = taskCache.find(t => t.id === taskId);
+    if (task) return task;
+
+    try {
+        const res = await fetch(`/api/tasks/${user.id}`);
+        const tasks = await res.json();
+        if (res.ok) {
+            taskCache = tasks;
+            return tasks.find(t => t.id === taskId);
+        }
+    } catch {}
+    return null;
 }
 
 // ================= WITHDRAW =================
@@ -190,9 +376,15 @@ async function withdraw(event) {
     const bankName = document.getElementById('bankName').value;
     const accountNumber = document.getElementById('accountNumber').value.trim();
 
-    if (!amount || amount < 100) return showMessage('withdrawMessage', 'Minimum is ₦100', 'error');
-    if (!bankName) return showMessage('withdrawMessage', 'Select a bank', 'error');
-    if (!/^\d{10}$/.test(accountNumber)) return showMessage('withdrawMessage', 'Invalid 10-digit account number', 'error');
+    if (!amount || amount < 100) {
+        return showMessage('withdrawMessage', 'Minimum withdrawal is ₦100', 'error');
+    }
+    if (!bankName) {
+        return showMessage('withdrawMessage', 'Please select a bank', 'error');
+    }
+    if (!/^\d{10}$/.test(accountNumber)) {
+        return showMessage('withdrawMessage', 'Account number must be 10 digits', 'error');
+    }
 
     try {
         const res = await fetch('/api/withdraw', {
@@ -203,9 +395,11 @@ async function withdraw(event) {
         const data = await res.json();
 
         if (res.ok) {
-            showMessage('withdrawMessage',
+            showMessage(
+                'withdrawMessage',
                 `✅ ₦${amount} withdrawal to ${bankName} (${accountNumber}) submitted!`,
-                'success');
+                'success'
+            );
             document.getElementById('withdrawForm').reset();
             loadDashboard();
         } else {
@@ -216,22 +410,67 @@ async function withdraw(event) {
     }
 }
 
+// ================= WITHDRAWAL HISTORY =================
+async function loadWithdrawalHistory() {
+    const container = document.getElementById('withdrawalHistory');
+    if (!container) return;
+
+    const user = Auth.getUser();
+    if (!user) return;
+
+    try {
+        const res = await fetch(`/api/withdrawals/${user.id}`);
+        const list = await res.json();
+
+        if (!res.ok || !list.length) {
+            container.innerHTML = '<p class="empty-state">No withdrawals yet.</p>';
+            return;
+        }
+
+        container.innerHTML = list.map(w => `
+            <div class="withdrawal-item">
+                <div>
+                    <strong>₦${w.amount.toLocaleString()}</strong>
+                    <span class="withdrawal-bank">${escapeHtml(w.bankName)} · ${w.accountNumber}</span>
+                </div>
+                <span class="withdrawal-status status-${w.status}">${w.status}</span>
+            </div>
+        `).join('');
+    } catch {
+        container.innerHTML = '<p class="empty-state">Could not load history.</p>';
+    }
+}
+
 // ================= UTILITIES =================
 function showMessage(elementId, message, type) {
     const el = document.getElementById(elementId);
     if (!el) return;
     el.textContent = message;
-    el.className = `message-${type}`;
+    el.className = `message message-${type}`;
     el.style.display = 'block';
     setTimeout(() => (el.style.display = 'none'), 5000);
 }
 
+function escapeHtml(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(str) {
+    return escapeHtml(str);
+}
+
 // ================= INIT =================
 document.addEventListener('DOMContentLoaded', () => {
-    // Redirect logged-in users away from auth pages
     const path = window.location.pathname;
     const user = Auth.getUser();
 
+    // Redirect logged-in users away from public pages
     if (user && (path === '/' || path === '/login' || path === '/register')) {
         window.location.href = '/dashboard';
         return;
@@ -246,5 +485,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const withdrawForm = document.getElementById('withdrawForm');
     if (withdrawForm) withdrawForm.addEventListener('submit', withdraw);
 
-    if (path === '/dashboard') loadDashboard();
+    if (path === '/dashboard') {
+        loadDashboard();
+    }
 });
