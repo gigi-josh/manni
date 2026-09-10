@@ -38,7 +38,8 @@ body {
     padding: 1rem 0;
     position: sticky;
     top: 0;
-    z-index: 100;
+    z-index: 1000;
+overflox-x: auto;
 }
 
 .navbar .container {
@@ -50,7 +51,7 @@ body {
 .nav-brand {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 7px;
     font-size: 1.5rem;
     font-weight: 800;
     color: var(--primary);
