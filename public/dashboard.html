@@ -12,18 +12,19 @@
     <nav class="navbar">
         <div class="container">
             <div class="nav-brand">
-                <img src="/api/placeholder/40/40" alt="MannieNG" class="logo">
+                <span class="logo-badge">M</span>
                 <span>MannieNG</span>
             </div>
             <div class="nav-links">
-                <span class="user-welcome">Welcome, <span id="username"></span>!</span>
-                <button onclick="logout()" class="btn btn-outline">Logout</button>
+                <span class="user-welcome">Hi, <span id="username">…</span></span>
+                <button onclick="Auth.logout()" class="btn btn-outline">Logout</button>
             </div>
         </div>
     </nav>
 
     <div class="dashboard">
         <div class="container">
+            <!-- Header + Stats -->
             <div class="dashboard-header">
                 <h1>Your Dashboard</h1>
                 <div class="dashboard-stats">
@@ -32,6 +33,13 @@
                         <div>
                             <span class="stat-label">Balance</span>
                             <span class="stat-value" id="balance">₦0</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fas fa-hourglass-half"></i>
+                        <div>
+                            <span class="stat-label">Pending</span>
+                            <span class="stat-value" id="pendingBalance">₦0</span>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -51,22 +59,28 @@
                 </div>
             </div>
 
+            <!-- Main content grid -->
             <div class="dashboard-content">
+                <!-- Tasks -->
                 <div class="tasks-section">
                     <h2>Available Tasks</h2>
-                    <div id="tasksContainer" class="tasks-grid"></div>
+                    <div id="tasksContainer" class="tasks-grid">
+                        <p class="empty-state">Loading tasks…</p>
+                    </div>
                 </div>
 
+                <!-- Withdraw -->
                 <div class="withdraw-section">
                     <h2>Withdraw Earnings</h2>
                     <div class="withdraw-card">
                         <form id="withdrawForm">
                             <div class="form-group">
-                                <label>Amount (₦)</label>
+                                <label for="withdrawAmount">Amount (₦)</label>
                                 <input type="number" id="withdrawAmount" min="100" required placeholder="Enter amount">
+                                <small>Minimum withdrawal: ₦100</small>
                             </div>
                             <div class="form-group">
-                                <label>Bank Name</label>
+                                <label for="bankName">Bank Name</label>
                                 <select id="bankName" required>
                                     <option value="">Select Bank</option>
                                     <option value="GTBank">GTBank</option>
@@ -74,21 +88,72 @@
                                     <option value="First Bank">First Bank</option>
                                     <option value="Zenith Bank">Zenith Bank</option>
                                     <option value="UBA">UBA</option>
-                                  <option value="Moniepoint">Moniepoint</option>
                                     <option value="Opay">Opay</option>
                                     <option value="PalmPay">PalmPay</option>
+                                    <option value="Kuda">Kuda</option>
+                                    <option value="Moniepoint">Moniepoint</option>
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label>Account Number</label>
-                                <input type="text" id="accountNumber" required placeholder="Enter 10-digit account number" pattern="\d{10}">
+                                <label for="accountNumber">Account Number</label>
+                                <input type="text"
+                                       id="accountNumber"
+                                       required
+                                       placeholder="10-digit account number"
+                                       pattern="\d{10}"
+                                       maxlength="10"
+                                       inputmode="numeric">
                             </div>
-                            <button type="submit" class="btn btn-primary">Withdraw</button>
+                            <button type="submit" class="btn btn-primary btn-full">
+                                Withdraw
+                            </button>
                         </form>
-                        <div id="withdrawMessage"></div>
+                        <div id="withdrawMessage" class="message"></div>
+                    </div>
+
+                    <h3 style="margin-top: 30px;">Withdrawal History</h3>
+                    <div id="withdrawalHistory">
+                        <p class="empty-state">Loading…</p>
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <footer>
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024 MannieNG. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- ================= WITHDRAW AD MODAL ================= -->
+    <div class="modal-overlay" id="withdrawAdModal">
+        <div class="modal-card">
+            <h3>Please watch this ad to unlock your withdrawal</h3>
+            <p class="modal-sub">Your withdrawal will be processed after the countdown ends.</p>
+
+            <div class="modal-ad-slot" id="withdrawAdSlot">
+                <!--
+                    Option A: Self-hosted video loop
+                    Option B: Paste an Adsterra / AdSense iframe here instead
+                -->
+                <video id="adVideo" autoplay muted loop playsinline>
+                    <source src="/ads/withdraw-ad.mp4" type="video/mp4">
+                    <!-- Fallback if no video file exists -->
+                    Your browser does not support video.
+                </video>
+            </div>
+
+            <div class="modal-timer" id="withdrawTimer">10:00</div>
+
+            <button id="confirmWithdrawBtn" class="btn btn-success btn-full" disabled>
+                Confirm Withdrawal
+            </button>
+            <button id="cancelWithdrawBtn" class="btn btn-outline btn-full" style="margin-top: 8px;">
+                Cancel
+            </button>
         </div>
     </div>
 
