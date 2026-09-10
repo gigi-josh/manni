@@ -275,6 +275,26 @@ textarea {
     font-weight: 500;
     font-size: 0.9rem;
 }
+.ground-banner-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-weight: 500;
+    min-height: 50px;
+    padding: 6px 10px;
+    background: var(--bg-light);
+    border-radius: 6px;
+    border: 1px dashed var(--border);
+}
+
+.ground-banner-placeholder i {
+    font-size: 1.2rem;
+    color: var(--primary);
+    opacity: 0.7;
+}
 
 .hero-illustration {
     background: linear-gradient(135deg, var(--primary) 0%, #FF8C42 100%);
