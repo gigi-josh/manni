@@ -6,15 +6,16 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 app.use(express.static('public'));
 
-// In-memory storage (swap for MongoDB/Postgres in production)
+// ---------- In-memory storage (swap for MongoDB/Postgres in production) ----------
 const users = [];
 const taskProgress = [];
+const withdrawalRequests = [];
 
-// Sample tasks for Nigerian users
+// ---------- Sample tasks with verification rules ----------
 const sampleTasks = [
     {
         id: 1,
@@ -23,7 +24,9 @@ const sampleTasks = [
         reward: 50,
         category: 'Video',
         link: 'https://youtube.com/watch?v=example1',
-        instructions: 'Watch the full video and confirm completion'
+        instructions: 'Watch the full video, then click "I\'m Done"',
+        verification: 'timed',
+        minSeconds: 120
     },
     {
         id: 2,
@@ -32,7 +35,9 @@ const sampleTasks = [
         reward: 100,
         category: 'Survey',
         link: 'https://survey.example.com',
-        instructions: 'Answer all questions honestly'
+        instructions: 'Answer all questions, then submit a screenshot link',
+        verification: 'proof',
+        minSeconds: 60
     },
     {
         id: 3,
@@ -41,7 +46,9 @@ const sampleTasks = [
         reward: 150,
         category: 'Download',
         link: 'https://play.google.com/store/apps/details?id=example',
-        instructions: 'Download, install and open the app'
+        instructions: 'Install, open the app, and submit a screenshot link',
+        verification: 'proof',
+        minSeconds: 60
     },
     {
         id: 4,
@@ -50,7 +57,9 @@ const sampleTasks = [
         reward: 200,
         category: 'Referral',
         link: '',
-        instructions: 'Share your referral link with friends'
+        instructions: 'Share your referral code. Reward after friend completes 1 task.',
+        verification: 'admin',
+        minSeconds: 0
     },
     {
         id: 5,
@@ -59,9 +68,38 @@ const sampleTasks = [
         reward: 75,
         category: 'Social',
         link: '',
-        instructions: 'Post using #MannieNG and tag @MannieNG'
+        instructions: 'Post using #MannieNG and tag @MannieNG, then submit the post URL',
+        verification: 'proof',
+        minSeconds: 0
     }
 ];
+
+// ---------- Helpers ----------
+function findUser(id) {
+    return users.find(u => u.id === parseInt(id));
+}
+
+function findProgress(userId, taskId) {
+    return taskProgress.find(tp => tp.userId === userId && tp.taskId === taskId);
+}
+
+function sanitizeUser(user) {
+    const { password, ...safe } = user;
+    return safe;
+}
+
+// Rate limit: max completions per hour
+const RATE_LIMIT_PER_HOUR = 10;
+
+function recentCompletionCount(userId) {
+    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    return taskProgress.filter(tp =>
+        tp.userId === userId &&
+        tp.completedAt &&
+        new Date(tp.completedAt).getTime() > oneHourAgo &&
+        (tp.status === 'completed' || tp.status === 'pending')
+    ).length;
+}
 
 // ---------- Pages ----------
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
@@ -69,7 +107,8 @@ app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'public', 
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 app.get('/register', (req, res) => res.sendFile(path.join(__dirname, 'public', 'register.html')));
 
-// ---------- Auth ----------
+// ==================== AUTH ====================
+
 app.post('/api/register', async (req, res) => {
     const { username, email, password, phone } = req.body;
 
@@ -77,13 +116,26 @@ app.post('/api/register', async (req, res) => {
         return res.status(400).json({ error: 'All fields are required' });
     }
 
+    if (username.length < 3) {
+        return res.status(400).json({ error: 'Username must be at least 3 characters' });
+    }
+
+    if (password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
     const phoneRegex = /^(\+234|0)[789][01]\d{8}$/;
     if (!phoneRegex.test(phone)) {
         return res.status(400).json({ error: 'Invalid Nigerian phone number' });
     }
 
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        return res.status(400).json({ error: 'Invalid email address' });
+    }
+
     if (users.find(u => u.email === email || u.username === username)) {
-        return res.status(400).json({ error: 'User already exists' });
+        return res.status(400).json({ error: 'User with that email or username already exists' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -95,6 +147,7 @@ app.post('/api/register', async (req, res) => {
         password: hashedPassword,
         phone,
         balance: 0,
+        pendingBalance: 0,
         tasksCompleted: 0,
         referralCode: `MNG${Date.now().toString(36).toUpperCase()}`,
         createdAt: new Date().toISOString()
@@ -102,21 +155,31 @@ app.post('/api/register', async (req, res) => {
 
     users.push(user);
 
+    // Initialize progress for all tasks
     sampleTasks.forEach(task => {
         taskProgress.push({
             userId: user.id,
             taskId: task.id,
-            completed: false,
-            completedAt: null
+            status: 'available',
+            startedAt: null,
+            completedAt: null,
+            proofUrl: null,
+            adminNote: null
         });
     });
 
-    const { password: _, ...safeUser } = user;
-    res.status(201).json({ message: 'Registration successful!', user: safeUser });
+    res.status(201).json({
+        message: 'Registration successful!',
+        user: sanitizeUser(user)
+    });
 });
 
 app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password required' });
+    }
 
     const user = users.find(u => u.email === email);
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
@@ -124,83 +187,316 @@ app.post('/api/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const { password: _, ...safeUser } = user;
-    res.json({ message: 'Login successful!', user: safeUser });
+    res.json({
+        message: 'Login successful!',
+        user: sanitizeUser(user)
+    });
 });
 
-// ---------- User ----------
+// ==================== USER ====================
+
 app.get('/api/user/:id', (req, res) => {
-    const user = users.find(u => u.id === parseInt(req.params.id));
+    const user = findUser(req.params.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-
-    const { password, ...safeUser } = user;
-    res.json(safeUser);
+    res.json(sanitizeUser(user));
 });
 
-// ---------- Tasks ----------
+// ==================== TASKS ====================
+
+// Get all tasks for a user with their current status
 app.get('/api/tasks/:userId', (req, res) => {
     const userId = parseInt(req.params.userId);
-    const user = users.find(u => u.id === userId);
+    const user = findUser(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const tasksWithStatus = sampleTasks.map(task => {
-        const progress = taskProgress.find(tp => tp.userId === userId && tp.taskId === task.id);
-        return { ...task, completed: progress ? progress.completed : false };
+        const p = findProgress(userId, task.id);
+        return {
+            ...task,
+            status: p ? p.status : 'available',
+            startedAt: p ? p.startedAt : null,
+            completedAt: p ? p.completedAt : null,
+            adminNote: p ? p.adminNote : null
+        };
     });
 
     res.json(tasksWithStatus);
 });
 
-app.post('/api/tasks/complete', (req, res) => {
+// Start a task (must be called before complete)
+app.post('/api/tasks/start', (req, res) => {
     const { userId, taskId } = req.body;
 
-    const user = users.find(u => u.id === userId);
+    const user = findUser(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
-
-    const progress = taskProgress.find(tp => tp.userId === userId && tp.taskId === taskId);
-    if (!progress) return res.status(404).json({ error: 'Task not found' });
-
-    if (progress.completed) return res.status(400).json({ error: 'Task already completed' });
 
     const task = sampleTasks.find(t => t.id === taskId);
     if (!task) return res.status(404).json({ error: 'Task not found' });
 
-    progress.completed = true;
-    progress.completedAt = new Date().toISOString();
+    const progress = findProgress(userId, taskId);
+    if (!progress) return res.status(404).json({ error: 'Task not found for user' });
 
+    if (progress.status === 'completed') {
+        return res.status(400).json({ error: 'Task already completed' });
+    }
+
+    if (progress.status === 'pending') {
+        return res.status(400).json({ error: 'Task awaiting admin approval' });
+    }
+
+    if (progress.status === 'started') {
+        // Already started — just return current state
+        return res.json({
+            message: 'Task already started',
+            startedAt: progress.startedAt,
+            minSeconds: task.minSeconds
+        });
+    }
+
+    progress.status = 'started';
+    progress.startedAt = new Date().toISOString();
+
+    res.json({
+        message: 'Task started',
+        startedAt: progress.startedAt,
+        minSeconds: task.minSeconds
+    });
+});
+
+// Complete a task (with verification)
+app.post('/api/tasks/complete', (req, res) => {
+    const { userId, taskId, proofUrl } = req.body;
+
+    const user = findUser(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const task = sampleTasks.find(t => t.id === taskId);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+
+    const progress = findProgress(userId, taskId);
+    if (!progress) return res.status(404).json({ error: 'Task not found for user' });
+
+    // ---- Guard: already done ----
+    if (progress.status === 'completed') {
+        return res.status(400).json({ error: 'Task already completed' });
+    }
+    if (progress.status === 'pending') {
+        return res.status(400).json({ error: 'Task awaiting admin approval' });
+    }
+
+    // ---- Guard: rate limit ----
+    if (recentCompletionCount(userId) >= RATE_LIMIT_PER_HOUR) {
+        return res.status(429).json({
+            error: `Too many completions. Max ${RATE_LIMIT_PER_HOUR} per hour. Try again later.`
+        });
+    }
+
+    // ---- Guard: must have started ----
+    if (progress.status !== 'started' || !progress.startedAt) {
+        return res.status(400).json({ error: 'You must start this task first' });
+    }
+
+    // ---- Guard: timed verification ----
+    if (task.verification === 'timed' && task.minSeconds > 0) {
+        const elapsed = (Date.now() - new Date(progress.startedAt).getTime()) / 1000;
+        if (elapsed < task.minSeconds) {
+            return res.status(400).json({
+                error: `Please spend at least ${task.minSeconds}s on this task. You've only done ${Math.floor(elapsed)}s.`
+            });
+        }
+    }
+
+    // ---- Proof/admin verification ----
+    if (task.verification === 'proof' || task.verification === 'admin') {
+        if (!proofUrl || typeof proofUrl !== 'string' || proofUrl.trim().length < 10) {
+            return res.status(400).json({
+                error: 'Please provide proof (screenshot URL, post URL, etc.) to submit'
+            });
+        }
+
+        progress.status = 'pending';
+        progress.proofUrl = proofUrl.trim();
+        progress.completedAt = new Date().toISOString();
+
+        // Move reward to pending balance (doesn't count as withdrawable)
+        user.pendingBalance = (user.pendingBalance || 0) + task.reward;
+
+        return res.json({
+            message: 'Submitted for review. Reward will be credited after approval.',
+            pending: true,
+            reward: task.reward,
+            pendingBalance: user.pendingBalance
+        });
+    }
+
+    // ---- Timed tasks auto-approve ----
+    progress.status = 'completed';
+    progress.completedAt = new Date().toISOString();
     user.balance += task.reward;
     user.tasksCompleted += 1;
 
     res.json({
-        message: 'Task completed successfully!',
+        message: 'Task completed!',
         reward: task.reward,
         newBalance: user.balance
     });
 });
 
-// ---------- Withdraw ----------
+// ==================== WITHDRAWALS ====================
+
 app.post('/api/withdraw', (req, res) => {
     const { userId, amount, bankName, accountNumber } = req.body;
 
-    const user = users.find(u => u.id === userId);
+    const user = findUser(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    if (user.balance < amount) return res.status(400).json({ error: 'Insufficient balance' });
-    if (amount < 100) return res.status(400).json({ error: 'Minimum withdrawal is ₦100' });
-    if (!/^\d{10}$/.test(accountNumber)) return res.status(400).json({ error: 'Invalid account number' });
+    const amt = parseInt(amount);
+    if (!amt || amt < 100) {
+        return res.status(400).json({ error: 'Minimum withdrawal is ₦100' });
+    }
+
+    if (user.balance < amt) {
+        return res.status(400).json({ error: 'Insufficient balance' });
+    }
+
+    if (!bankName || typeof bankName !== 'string') {
+        return res.status(400).json({ error: 'Bank name is required' });
+    }
+
+    if (!/^\d{10}$/.test(accountNumber)) {
+        return res.status(400).json({ error: 'Account number must be 10 digits' });
+    }
 
     // TODO: integrate Flutterwave / Paystack here
-    user.balance -= amount;
+    user.balance -= amt;
+
+    withdrawalRequests.push({
+        id: withdrawalRequests.length + 1,
+        userId: user.id,
+        amount: amt,
+        bankName,
+        accountNumber,
+        status: 'processing',
+        requestedAt: new Date().toISOString()
+    });
 
     res.json({
         message: 'Withdrawal request submitted!',
-        amount,
+        amount: amt,
         newBalance: user.balance,
         bankName,
         accountNumber
     });
 });
 
+app.get('/api/withdrawals/:userId', (req, res) => {
+    const userId = parseInt(req.params.userId);
+    const user = findUser(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const list = withdrawalRequests
+        .filter(w => w.userId === userId)
+        .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+
+    res.json(list);
+});
+
+// ==================== ADMIN ====================
+
+// List all pending tasks awaiting review
+app.get('/api/admin/pending', (req, res) => {
+    const { adminKey } = req.query;
+    if (adminKey !== process.env.ADMIN_KEY) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const pending = taskProgress
+        .filter(tp => tp.status === 'pending')
+        .map(tp => {
+            const user = findUser(tp.userId);
+            const task = sampleTasks.find(t => t.id === tp.taskId);
+            return {
+                userId: tp.userId,
+                username: user ? user.username : 'Unknown',
+                email: user ? user.email : '',
+                taskId: tp.taskId,
+                taskTitle: task ? task.title : '',
+                reward: task ? task.reward : 0,
+                proofUrl: tp.proofUrl,
+                submittedAt: tp.completedAt
+            };
+        });
+
+    res.json(pending);
+});
+
+// Approve or reject a pending submission
+app.post('/api/admin/review', (req, res) => {
+    const { adminKey, userId, taskId, approve, note } = req.body;
+
+    if (adminKey !== process.env.ADMIN_KEY) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const progress = findProgress(userId, taskId);
+    if (!progress || progress.status !== 'pending') {
+        return res.status(404).json({ error: 'No pending submission found' });
+    }
+
+    const task = sampleTasks.find(t => t.id === taskId);
+    const user = findUser(userId);
+    if (!task || !user) {
+        return res.status(404).json({ error: 'Task or user not found' });
+    }
+
+    // Remove reward from pending balance
+    user.pendingBalance = Math.max(0, (user.pendingBalance || 0) - task.reward);
+
+    if (approve) {
+        progress.status = 'completed';
+        progress.adminNote = note || null;
+        user.balance += task.reward;
+        user.tasksCompleted += 1;
+
+        return res.json({
+            message: 'Approved',
+            userId,
+            taskId,
+            reward: task.reward,
+            newBalance: user.balance,
+            newPendingBalance: user.pendingBalance
+        });
+    } else {
+        progress.status = 'rejected';
+        progress.adminNote = note || 'Proof insufficient';
+        progress.proofUrl = null;
+
+        return res.json({
+            message: 'Rejected',
+            userId,
+            taskId,
+            note: progress.adminNote,
+            newPendingBalance: user.pendingBalance
+        });
+    }
+});
+
+// List all users (admin)
+app.get('/api/admin/users', (req, res) => {
+    const { adminKey } = req.query;
+    if (adminKey !== process.env.ADMIN_KEY) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    res.json(users.map(sanitizeUser));
+});
+
+// ==================== START ====================
+
 app.listen(PORT, () => {
     console.log(`MannieNG server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    if (!process.env.ADMIN_KEY) {
+        console.warn('⚠️  ADMIN_KEY not set — admin endpoints will reject all requests');
+    }
 });
