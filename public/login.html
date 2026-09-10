@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - MannieNG</title>
+    <meta name="description" content="Login to your MannieNG account and continue earning money online in Nigeria.">
     <link rel="stylesheet" href="/css/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -20,11 +21,19 @@
             <form id="loginForm">
                 <div class="form-group">
                     <label for="email">Email Address</label>
-                    <input type="email" id="email" required placeholder="you@example.com" autocomplete="email">
+                    <input type="email"
+                           id="email"
+                           required
+                           placeholder="you@example.com"
+                           autocomplete="email">
                 </div>
                 <div class="form-group">
                     <label for="password">Password</label>
-                    <input type="password" id="password" required placeholder="Enter your password" autocomplete="current-password">
+                    <input type="password"
+                           id="password"
+                           required
+                           placeholder="Enter your password"
+                           autocomplete="current-password">
                 </div>
                 <button type="submit" class="btn btn-primary btn-full">Login</button>
             </form>
@@ -34,6 +43,35 @@
             <div class="auth-footer">
                 <p>Don't have an account? <a href="/register">Sign up</a></p>
                 <p><a href="/">← Back to Home</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= GROUND BANNER AD ================= -->
+    <div class="ground-banner" id="groundBanner">
+        <button class="ground-banner-close"
+                onclick="document.getElementById('groundBanner').remove()"
+                aria-label="Close ad">
+            <i class="fas fa-times"></i>
+        </button>
+        <div class="ground-banner-content">
+            <!--
+                REPLACE with your real ad code:
+
+                Option A — Image banner:
+                <a href="https://your-advertiser-link.com" target="_blank" rel="noopener">
+                    <img src="https://your-ad-network.com/banner-728x90.jpg"
+                         alt="Advertisement"
+                         class="ground-banner-img">
+                </a>
+
+                Option B — Adsterra / AdSense iframe or JS snippet
+
+                For now, this placeholder shows:
+            -->
+            <div class="ground-banner-placeholder">
+                <i class="fas fa-bullhorn"></i>
+                <span>Ad Space — Ground Banner (728×90)</span>
             </div>
         </div>
     </div>
