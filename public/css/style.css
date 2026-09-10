@@ -523,7 +523,27 @@ overflox-x: auto;
     opacity: 0.7;
     border-color: var(--success);
 }
+.task-timer {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #EDF2F7;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+}
 
+.task-timer.timer-ready {
+    background: #F0FFF4;
+    color: #22543D;
+    font-weight: 600;
+}
+
+.task-pending {
+    color: #B7791F;
+    font-weight: 600;
+    padding: 10px;
+}
 .withdraw-card {
     background: var(--bg-light);
     padding: 20px;
