@@ -31,6 +31,15 @@ const Auth = {
 // Track active timers so we can clear them on reload
 const activeTimers = {};
 
+// Cache tasks so completeTask doesn't re-fetch
+let taskCache = [];
+
+// Pending withdrawal payload (set before ad modal opens)
+let pendingWithdrawal = null;
+
+// Withdraw ad interval handle
+let withdrawAdInterval = null;
+
 // ================= REGISTER =================
 async function register(event) {
     event.preventDefault();
@@ -117,16 +126,17 @@ async function loadDashboard() {
         // Refresh LocalStorage with latest server data
         Auth.setUser(user);
 
-        document.getElementById('username').textContent = user.username;
-        document.getElementById('balance').textContent = `₦${(user.balance || 0).toLocaleString()}`;
-        document.getElementById('tasksCompleted').textContent = user.tasksCompleted || 0;
-        document.getElementById('referralCode').textContent = user.referralCode || '-';
-
-        // Optional pending balance display
+        const usernameEl = document.getElementById('username');
+        const balanceEl = document.getElementById('balance');
+        const tasksEl = document.getElementById('tasksCompleted');
+        const referralEl = document.getElementById('referralCode');
         const pendingEl = document.getElementById('pendingBalance');
-        if (pendingEl) {
-            pendingEl.textContent = `₦${(user.pendingBalance || 0).toLocaleString()}`;
-        }
+
+        if (usernameEl) usernameEl.textContent = user.username;
+        if (balanceEl) balanceEl.textContent = `₦${(user.balance || 0).toLocaleString()}`;
+        if (tasksEl) tasksEl.textContent = user.tasksCompleted || 0;
+        if (referralEl) referralEl.textContent = user.referralCode || '-';
+        if (pendingEl) pendingEl.textContent = `₦${(user.pendingBalance || 0).toLocaleString()}`;
 
         loadTasks();
         loadWithdrawalHistory();
@@ -152,6 +162,8 @@ async function loadTasks() {
             document.getElementById('tasksContainer').innerHTML = '<p>Failed to load tasks.</p>';
             return;
         }
+
+        taskCache = tasks; // keep fresh copy
 
         const container = document.getElementById('tasksContainer');
         container.innerHTML = '';
@@ -184,7 +196,7 @@ function renderTaskCard(task) {
 
         case 'rejected':
             actionHtml = `
-                <div class="task-rejected-note">${task.adminNote || 'Proof insufficient'}</div>
+                <div class="task-rejected-note">${escapeHtml(task.adminNote || 'Proof insufficient')}</div>
                 <button onclick="startTask(${task.id})" class="btn btn-outline">Retry</button>
             `;
             break;
@@ -214,6 +226,11 @@ function renderTaskCard(task) {
             ? `<span class="badge badge-timed">⏱ ${task.minSeconds}s min</span>`
             : '';
 
+    // Route task links through the ad interstitial page
+    const adLink = task.link
+        ? `/ad/${task.id}?url=${encodeURIComponent(task.link)}`
+        : '';
+
     card.innerHTML = `
         <div class="task-header">
             <span class="task-title">${escapeHtml(task.title)}</span>
@@ -226,8 +243,8 @@ function renderTaskCard(task) {
         <p class="task-description">${escapeHtml(task.description)}</p>
         <small class="task-instructions">${escapeHtml(task.instructions)}</small>
         <div class="task-actions">
-            ${task.link
-                ? `<a href="${escapeAttr(task.link)}" target="_blank" rel="noopener" class="task-link">Open Task</a>`
+            ${adLink
+                ? `<a href="${escapeAttr(adLink)}" target="_blank" rel="noopener" class="task-link">Open Task</a>`
                 : ''}
             ${actionHtml}
         </div>
@@ -295,7 +312,7 @@ async function completeTask(taskId) {
     const user = Auth.getUser();
     if (!user) return;
 
-    const task = await getTaskById(taskId);
+    const task = taskCache.find(t => t.id === taskId);
     if (!task) {
         alert('Task not found');
         return;
@@ -344,28 +361,7 @@ async function completeTask(taskId) {
     }
 }
 
-// Cache tasks so completeTask doesn't re-fetch
-let taskCache = [];
-async function getTaskById(taskId) {
-    const user = Auth.getUser();
-    if (!user) return null;
-
-    // Try cache first
-    let task = taskCache.find(t => t.id === taskId);
-    if (task) return task;
-
-    try {
-        const res = await fetch(`/api/tasks/${user.id}`);
-        const tasks = await res.json();
-        if (res.ok) {
-            taskCache = tasks;
-            return tasks.find(t => t.id === taskId);
-        }
-    } catch {}
-    return null;
-}
-
-// ================= WITHDRAW =================
+// ================= WITHDRAW (with 10-min ad modal) =================
 async function withdraw(event) {
     event.preventDefault();
 
@@ -386,18 +382,102 @@ async function withdraw(event) {
         return showMessage('withdrawMessage', 'Account number must be 10 digits', 'error');
     }
 
+    // Save payload and open the ad modal
+    pendingWithdrawal = { userId: user.id, amount, bankName, accountNumber };
+    openWithdrawAdModal();
+}
+
+function openWithdrawAdModal() {
+    const modal = document.getElementById('withdrawAdModal');
+    if (!modal) {
+        // Fallback: if no modal exists, submit directly
+        return submitWithdrawal();
+    }
+
+    const timerEl = document.getElementById('withdrawTimer');
+    const confirmBtn = document.getElementById('confirmWithdrawBtn');
+    const cancelBtn = document.getElementById('cancelWithdrawBtn');
+    const video = document.getElementById('adVideo');
+
+    modal.classList.add('open');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Confirm Withdrawal';
+    timerEl.classList.remove('timer-ready');
+
+    // Tell the server the user started watching the ad
+    fetch('/api/withdraw/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: Auth.getUser().id })
+    }).catch(() => {});
+
+    // 10 minutes = 600 seconds
+    let remaining = 600;
+
+    const format = (s) => {
+        const m = Math.floor(s / 60);
+        const sec = s % 60;
+        return `${m}:${String(sec).padStart(2, '0')}`;
+    };
+
+    timerEl.textContent = format(remaining);
+
+    // Try to play the video
+    if (video) video.play().catch(() => {});
+
+    // Clear any previous interval
+    if (withdrawAdInterval) clearInterval(withdrawAdInterval);
+
+    withdrawAdInterval = setInterval(() => {
+        remaining--;
+        timerEl.textContent = format(remaining);
+
+        if (remaining <= 0) {
+            clearInterval(withdrawAdInterval);
+            withdrawAdInterval = null;
+            timerEl.textContent = '✅ Unlocked';
+            timerEl.classList.add('timer-ready');
+            confirmBtn.disabled = false;
+        }
+    }, 1000);
+
+    // Confirm handler
+    confirmBtn.onclick = () => submitWithdrawal();
+
+    // Cancel handler
+    cancelBtn.onclick = () => {
+        if (withdrawAdInterval) {
+            clearInterval(withdrawAdInterval);
+            withdrawAdInterval = null;
+        }
+        closeWithdrawAdModal();
+        pendingWithdrawal = null;
+    };
+}
+
+async function submitWithdrawal() {
+    if (!pendingWithdrawal) return;
+
+    const confirmBtn = document.getElementById('confirmWithdrawBtn');
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Processing…';
+    }
+
     try {
         const res = await fetch('/api/withdraw', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: user.id, amount, bankName, accountNumber })
+            body: JSON.stringify(pendingWithdrawal)
         });
         const data = await res.json();
+
+        closeWithdrawAdModal();
 
         if (res.ok) {
             showMessage(
                 'withdrawMessage',
-                `✅ ₦${amount} withdrawal to ${bankName} (${accountNumber}) submitted!`,
+                `✅ ₦${data.amount} withdrawal to ${data.bankName} (${data.accountNumber}) submitted!`,
                 'success'
             );
             document.getElementById('withdrawForm').reset();
@@ -406,7 +486,32 @@ async function withdraw(event) {
             showMessage('withdrawMessage', data.error || 'Withdrawal failed', 'error');
         }
     } catch {
+        closeWithdrawAdModal();
         showMessage('withdrawMessage', 'Network error. Try again.', 'error');
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.textContent = 'Confirm Withdrawal';
+            confirmBtn.disabled = true;
+        }
+        pendingWithdrawal = null;
+    }
+}
+
+function closeWithdrawAdModal() {
+    const modal = document.getElementById('withdrawAdModal');
+    const video = document.getElementById('adVideo');
+    if (video) {
+        video.pause();
+        video.currentTime = 0;
+    }
+    if (modal) modal.classList.remove('open');
+
+    const timerEl = document.getElementById('withdrawTimer');
+    if (timerEl) timerEl.classList.remove('timer-ready');
+
+    if (withdrawAdInterval) {
+        clearInterval(withdrawAdInterval);
+        withdrawAdInterval = null;
     }
 }
 
@@ -431,9 +536,9 @@ async function loadWithdrawalHistory() {
             <div class="withdrawal-item">
                 <div>
                     <strong>₦${w.amount.toLocaleString()}</strong>
-                    <span class="withdrawal-bank">${escapeHtml(w.bankName)} · ${w.accountNumber}</span>
+                    <span class="withdrawal-bank">${escapeHtml(w.bankName)} · ${escapeHtml(w.accountNumber)}</span>
                 </div>
-                <span class="withdrawal-status status-${w.status}">${w.status}</span>
+                <span class="withdrawal-status status-${w.status}">${escapeHtml(w.status)}</span>
             </div>
         `).join('');
     } catch {
