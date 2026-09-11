@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Surveys - MannieNG</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <span class="logo-badge">M</span>
+                <span>MannieNG</span>
+            </div>
+            <div class="nav-links">
+                <a href="/dashboard" class="btn btn-outline">← Back to Dashboard</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="survey-page">
+        <div class="container">
+            <h1>Earn from Surveys</h1>
+            <p class="survey-intro">Complete surveys and get paid automatically. Rewards are credited to your balance as soon as a survey is approved.</p>
+            <div id="surveyContainer" class="survey-frame-container">
+                <p class="empty-state">Loading surveys…</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/main.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const user = Auth.getUser();
+            if (!user) {
+                window.location.href = '/login';
+                return;
+            }
+
+            const container = document.getElementById('surveyContainer');
+
+            try {
+                const res = await fetch(`/api/cpx-hash/${user.id}`);
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.error || 'Could not load surveys');
+                }
+
+                const params = new URLSearchParams({
+                    app_id: data.appId,
+                    ext_user_id: data.userId,
+                    username: data.username,
+                    email: data.email,
+                    secure_hash: data.hash
+                });
+
+                const url = `https://offers.cpx-research.com/index.php?${params.toString()}`;
+
+                container.innerHTML = `
+                    <iframe
+                        src="${url}"
+                        class="survey-iframe"
+                        width="100%"
+                        height="2000"
+                        frameborder="0"
+                        title="CPX Research Surveys">
+                    </iframe>
+                `;
+            } catch (err) {
+                console.error(err);
+                container.innerHTML = '<p class="empty-state">Surveys are temporarily unavailable. Please try again later.</p>';
+            }
+        });
+    </script>
+</body>
+</html>
