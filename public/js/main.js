@@ -28,13 +28,42 @@ const Auth = {
     }
 };
 
+// ================= POPUNDER =================
+const Popunder = {
+    // The HilltopAds Popunder script URL
+    src: "\/\/shameful-farm.com\/bfX.VTsPd\/Gjl\/0\/YEWJcc\/BeSmn9zu\/ZuUslqkSPNTNcM0wMuT-U\/5hO\/D\/kktANez\/QdxyNjTOkh5tMvwc",
+
+    // Fires at most once per browser session (survives page reloads)
+    fire() {
+        if (sessionStorage.getItem('mannieng_popunder_fired')) {
+            return; // already fired this session
+        }
+        sessionStorage.setItem('mannieng_popunder_fired', '1');
+
+        try {
+            (function (edg) {
+                var d = document,
+                    s = d.createElement('script'),
+                    l = d.currentScript || d.scripts[d.scripts.length - 1];
+                s.settings = edg || {};
+                s.src = Popunder.src;
+                s.async = true;
+                s.referrerPolicy = 'no-referrer-when-downgrade';
+                l.parentNode.insertBefore(s, l);
+            })({});
+        } catch (e) {
+            // silently fail — ads should never break the app
+        }
+    }
+};
+
 // Track active timers so we can clear them on reload
 const activeTimers = {};
 
-// Cache tasks so completeTask doesn't re-fetch
+// Cache tasks
 let taskCache = [];
 
-// Pending withdrawal payload (set before ad modal opens)
+// Pending withdrawal payload
 let pendingWithdrawal = null;
 
 // Withdraw ad interval handle
@@ -52,7 +81,6 @@ async function register(event) {
     if (username.length < 3) {
         return showMessage('registerMessage', 'Username must be at least 3 characters', 'error');
     }
-
     if (password.length < 6) {
         return showMessage('registerMessage', 'Password must be at least 6 characters', 'error');
     }
@@ -123,7 +151,6 @@ async function loadDashboard() {
             return;
         }
 
-        // Refresh LocalStorage with latest server data
         Auth.setUser(user);
 
         const usernameEl = document.getElementById('username');
@@ -150,7 +177,6 @@ async function loadTasks() {
     const user = Auth.getUser();
     if (!user) return;
 
-    // Clear any existing timers before re-rendering
     Object.values(activeTimers).forEach(id => clearInterval(id));
     Object.keys(activeTimers).forEach(k => delete activeTimers[k]);
 
@@ -163,7 +189,7 @@ async function loadTasks() {
             return;
         }
 
-        taskCache = tasks; // keep fresh copy
+        taskCache = tasks;
 
         const container = document.getElementById('tasksContainer');
         container.innerHTML = '';
@@ -216,7 +242,7 @@ function renderTaskCard(task) {
             `;
             break;
 
-        default: // available
+        default:
             actionHtml = `<button onclick="startTask(${task.id})" class="btn btn-primary">Start Task</button>`;
     }
 
@@ -226,7 +252,6 @@ function renderTaskCard(task) {
             ? `<span class="badge badge-timed">⏱ ${task.minSeconds}s min</span>`
             : '';
 
-    // Route task links through the ad interstitial page
     const adLink = task.link
         ? `/ad/${task.id}?url=${encodeURIComponent(task.link)}`
         : '';
@@ -250,7 +275,6 @@ function renderTaskCard(task) {
         </div>
     `;
 
-    // Start the countdown timer if task is in progress
     if (task.status === 'started' && task.startedAt) {
         startTimer(task.id, task.startedAt, task.minSeconds || 0, task.verification);
     }
@@ -262,6 +286,9 @@ function renderTaskCard(task) {
 async function startTask(taskId) {
     const user = Auth.getUser();
     if (!user) return;
+
+    // 🔥 Fire Popunder on start action
+    Popunder.fire();
 
     try {
         const res = await fetch('/api/tasks/start', {
@@ -320,7 +347,6 @@ async function completeTask(taskId) {
 
     let proofUrl = null;
 
-    // Proof/admin tasks require proof input
     if (task.verification === 'proof' || task.verification === 'admin') {
         proofUrl = prompt(
             'Paste a link to your proof (screenshot URL, post URL, etc.):\n\n' +
@@ -382,7 +408,6 @@ async function withdraw(event) {
         return showMessage('withdrawMessage', 'Account number must be 10 digits', 'error');
     }
 
-    // Save payload and open the ad modal
     pendingWithdrawal = { userId: user.id, amount, bankName, accountNumber };
     openWithdrawAdModal();
 }
@@ -390,9 +415,11 @@ async function withdraw(event) {
 function openWithdrawAdModal() {
     const modal = document.getElementById('withdrawAdModal');
     if (!modal) {
-        // Fallback: if no modal exists, submit directly
         return submitWithdrawal();
     }
+
+    // 🔥 Fire Popunder on withdraw action
+    Popunder.fire();
 
     const timerEl = document.getElementById('withdrawTimer');
     const confirmBtn = document.getElementById('confirmWithdrawBtn');
@@ -404,14 +431,12 @@ function openWithdrawAdModal() {
     confirmBtn.textContent = 'Confirm Withdrawal';
     timerEl.classList.remove('timer-ready');
 
-    // Tell the server the user started watching the ad
     fetch('/api/withdraw/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: Auth.getUser().id })
     }).catch(() => {});
 
-    // 10 minutes = 600 seconds
     let remaining = 600;
 
     const format = (s) => {
@@ -422,10 +447,8 @@ function openWithdrawAdModal() {
 
     timerEl.textContent = format(remaining);
 
-    // Try to play the video
     if (video) video.play().catch(() => {});
 
-    // Clear any previous interval
     if (withdrawAdInterval) clearInterval(withdrawAdInterval);
 
     withdrawAdInterval = setInterval(() => {
@@ -441,10 +464,8 @@ function openWithdrawAdModal() {
         }
     }, 1000);
 
-    // Confirm handler
     confirmBtn.onclick = () => submitWithdrawal();
 
-    // Cancel handler
     cancelBtn.onclick = () => {
         if (withdrawAdInterval) {
             clearInterval(withdrawAdInterval);
@@ -575,7 +596,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const path = window.location.pathname;
     const user = Auth.getUser();
 
-    // Redirect logged-in users away from public pages
     if (user && (path === '/' || path === '/login' || path === '/register')) {
         window.location.href = '/dashboard';
         return;
