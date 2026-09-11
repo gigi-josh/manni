@@ -28,31 +28,23 @@ const Auth = {
     }
 };
 
-// ================= POPUNDER =================
+// ================= POPUNDER (Adsterra) =================
 const Popunder = {
-    // The HilltopAds Popunder script URL
-    src: "\/\/shameful-farm.com\/bfX.VTsPd\/Gjl\/0\/YEWJcc\/BeSmn9zu\/ZuUslqkSPNTNcM0wMuT-U\/5hO\/D\/kktANez\/QdxyNjTOkh5tMvwc",
+    src: "https://pl31287847.profitableratecpmnetwork.com/45/6c/f2/456cf2a7c0671bb8bdb1924b6cee4621.js",
 
-    // Fires at most once per browser session (survives page reloads)
+    // Fires at most once per browser session
     fire() {
-        if (sessionStorage.getItem('mannieng_popunder_fired')) {
-            return; // already fired this session
-        }
+        if (sessionStorage.getItem('mannieng_popunder_fired')) return;
         sessionStorage.setItem('mannieng_popunder_fired', '1');
 
         try {
-            (function (edg) {
-                var d = document,
-                    s = d.createElement('script'),
-                    l = d.currentScript || d.scripts[d.scripts.length - 1];
-                s.settings = edg || {};
-                s.src = Popunder.src;
-                s.async = true;
-                s.referrerPolicy = 'no-referrer-when-downgrade';
-                l.parentNode.insertBefore(s, l);
-            })({});
+            const s = document.createElement('script');
+            s.src = Popunder.src;
+            s.async = true;
+            s.referrerPolicy = 'no-referrer-when-downgrade';
+            document.body.appendChild(s);
         } catch (e) {
-            // silently fail — ads should never break the app
+            // silent fail — ads should never break the app
         }
     }
 };
@@ -287,7 +279,7 @@ async function startTask(taskId) {
     const user = Auth.getUser();
     if (!user) return;
 
-    // 🔥 Fire Popunder on start action
+    // 🔥 Fire Adsterra Popunder on start action
     Popunder.fire();
 
     try {
@@ -418,13 +410,12 @@ function openWithdrawAdModal() {
         return submitWithdrawal();
     }
 
-    // 🔥 Fire Popunder on withdraw action
+    // 🔥 Fire Adsterra Popunder on withdraw action
     Popunder.fire();
 
     const timerEl = document.getElementById('withdrawTimer');
     const confirmBtn = document.getElementById('confirmWithdrawBtn');
     const cancelBtn = document.getElementById('cancelWithdrawBtn');
-    const video = document.getElementById('adVideo');
 
     modal.classList.add('open');
     confirmBtn.disabled = true;
@@ -446,8 +437,6 @@ function openWithdrawAdModal() {
     };
 
     timerEl.textContent = format(remaining);
-
-    if (video) video.play().catch(() => {});
 
     if (withdrawAdInterval) clearInterval(withdrawAdInterval);
 
@@ -520,11 +509,6 @@ async function submitWithdrawal() {
 
 function closeWithdrawAdModal() {
     const modal = document.getElementById('withdrawAdModal');
-    const video = document.getElementById('adVideo');
-    if (video) {
-        video.pause();
-        video.currentTime = 0;
-    }
     if (modal) modal.classList.remove('open');
 
     const timerEl = document.getElementById('withdrawTimer');
