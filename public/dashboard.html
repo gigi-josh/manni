@@ -17,6 +17,9 @@
             </div>
             <div class="nav-links">
                 <span class="user-welcome">Hi, <span id="username">…</span></span>
+                <a href="/transfer" class="btn btn-outline">
+                    <i class="fas fa-paper-plane"></i> Transfer
+                </a>
                 <button onclick="Auth.logout()" class="btn btn-outline">Logout</button>
             </div>
         </div>
@@ -24,6 +27,8 @@
 
     <div class="dashboard">
         <div class="container">
+
+            <!-- Header + Stats -->
             <div class="dashboard-header">
                 <h1>Your Dashboard</h1>
                 <div class="dashboard-stats">
@@ -58,71 +63,51 @@
                 </div>
             </div>
 
+            <!-- Survey CTA -->
+            <div class="survey-cta">
+                <div class="survey-cta-content">
+                    <i class="fas fa-poll"></i>
+                    <div>
+                        <h3>Earn from Surveys</h3>
+                        <p>Complete short surveys and get paid automatically.</p>
+                    </div>
+                </div>
+                <a href="/surveys" class="btn">
+                    <i class="fas fa-arrow-right"></i> Take a Survey
+                </a>
+            </div>
+
+            <!-- Main content grid -->
             <div class="dashboard-content">
+
+                <!-- Tasks -->
                 <div class="tasks-section">
                     <h2>Available Tasks</h2>
                     <div id="tasksContainer" class="tasks-grid">
                         <p class="empty-state">Loading tasks…</p>
                     </div>
-<!-- Survey CTA -->
-<div class="survey-cta">
-    <div class="survey-cta-content">
-        <i class="fas fa-poll"></i>
-        <div>
-            <h3>Earn from Surveys</h3>
-            <p>Complete short surveys and get paid automatically.</p>
-        </div>
-    </div>
-    <a href="/surveys" class="btn btn-primary">Take a Survey</a>
-</div>
                 </div>
 
+                <!-- Transfer -->
                 <div class="withdraw-section">
-                    <h2>Withdraw Earnings</h2>
-                    <div class="withdraw-card">
-                        <form id="withdrawForm">
-                            <div class="form-group">
-                                <label for="withdrawAmount">Amount (₦)</label>
-                                <input type="number" id="withdrawAmount" min="100" required placeholder="Enter amount">
-                                <small>Minimum withdrawal: ₦100</small>
-                            </div>
-                            <div class="form-group">
-                                <label for="bankName">Bank Name</label>
-                                <select id="bankName" required>
-                                    <option value="">Select Bank</option>
-                                    <option value="GTBank">GTBank</option>
-                                    <option value="Access Bank">Access Bank</option>
-                                    <option value="First Bank">First Bank</option>
-                                    <option value="Zenith Bank">Zenith Bank</option>
-                                    <option value="UBA">UBA</option>
-                                    <option value="Opay">Opay</option>
-                                    <option value="PalmPay">PalmPay</option>
-                                    <option value="Kuda">Kuda</option>
-                                    <option value="Moniepoint">Moniepoint</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="accountNumber">Account Number</label>
-                                <input type="text"
-                                       id="accountNumber"
-                                       required
-                                       placeholder="10-digit account number"
-                                       pattern="\d{10}"
-                                       maxlength="10"
-                                       inputmode="numeric">
-                            </div>
-                            <button type="submit" class="btn btn-primary btn-full">
-                                Withdraw
-                            </button>
-                        </form>
-                        <div id="withdrawMessage" class="message"></div>
+                    <h2>Transfer to Bank</h2>
+                    <p class="page-sub">Move your balance to your Nigerian bank account.</p>
+
+                    <a href="/transfer" class="btn btn-primary btn-full" style="margin-top: 14px;">
+                        <i class="fas fa-paper-plane"></i> Go to Transfer Page
+                    </a>
+
+                    <div class="transfer-rule-note">
+                        <i class="fas fa-info-circle"></i>
+                        <span>Transfers are only available from the <strong>1st to the 5th</strong> of each month.</span>
                     </div>
 
-                    <h3 style="margin-top: 30px;">Withdrawal History</h3>
+                    <h3 style="margin-top: 30px;">Recent Transfers</h3>
                     <div id="withdrawalHistory">
                         <p class="empty-state">Loading…</p>
                     </div>
                 </div>
+
             </div>
         </div>
     </div>
@@ -130,41 +115,10 @@
     <footer>
         <div class="container">
             <div class="footer-bottom">
-                <p>&copy; 2024 MannieNG. All rights reserved.</p>
+                <p>&copy; 2026 MannieNG. All rights reserved.</p>
             </div>
         </div>
     </footer>
-
-    <!-- ================= WITHDRAW AD MODAL ================= -->
-    <div class="modal-overlay" id="withdrawAdModal">
-        <div class="modal-card">
-            <h3>Please watch this ad to unlock your withdrawal</h3>
-            <p class="modal-sub">Your withdrawal will be processed after the countdown ends.</p>
-
-            <div class="modal-ad-slot" id="withdrawAdSlot">
-                <!-- Adsterra 300x250 banner -->
-                <script>
-                  atOptions = {
-                    'key' : '7330eeefe6ee702d2cfca77bd8a7ce0f',
-                    'format' : 'iframe',
-                    'height' : 250,
-                    'width' : 300,
-                    'params' : {}
-                  };
-                </script>
-                <script src="https://www.highrevenueformat.com/7330eeefe6ee702d2cfca77bd8a7ce0f/invoke.js"></script>
-            </div>
-
-            <div class="modal-timer" id="withdrawTimer">10:00</div>
-
-            <button id="confirmWithdrawBtn" class="btn btn-success btn-full" disabled>
-                Confirm Withdrawal
-            </button>
-            <button id="cancelWithdrawBtn" class="btn btn-outline btn-full" style="margin-top: 8px;">
-                Cancel
-            </button>
-        </div>
-    </div>
 
     <script src="/js/main.js"></script>
 </body>
