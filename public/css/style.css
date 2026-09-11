@@ -672,6 +672,106 @@ textarea {
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 16px;
 }
+.survey-cta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+    background: linear-gradient(135deg, var(--primary) 0%, #FF8C42 100%);
+    color: var(--white);
+    padding: 20px 24px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 28px;
+}
+
+.survey-cta-content {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+    flex: 1;
+}
+
+.survey-cta-content i {
+    font-size: 2rem;
+    flex-shrink: 0;
+}
+
+.survey-cta-content h3 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 2px;
+}
+
+.survey-cta-content p {
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+.survey-cta .btn {
+    background: var(--white);
+    color: var(--primary);
+    border-color: var(--white);
+    flex-shrink: 0;
+}
+
+.survey-cta .btn:hover {
+    background: var(--primary-light);
+    border-color: var(--primary-light);
+}
+
+/* Survey page */
+.survey-page {
+    padding: 32px 0 60px;
+}
+
+.survey-page h1 {
+    font-size: clamp(1.5rem, 3vw, 2rem);
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.survey-intro {
+    color: var(--accent);
+    margin-bottom: 24px;
+    font-size: 0.95rem;
+}
+
+.survey-frame-container {
+    background: var(--white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    min-height: 600px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.survey-iframe {
+    width: 100%;
+    border: none;
+    display: block;
+    min-height: 1000px;
+}
+
+@media (max-width: 640px) {
+    .survey-cta {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: center;
+    }
+    .survey-cta-content {
+        flex-direction: column;
+        text-align: center;
+    }
+    .survey-cta .btn {
+        width: 100%;
+    }
+}
 
 .stat-card {
     background: var(--white);
