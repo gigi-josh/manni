@@ -8,8 +8,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
-<body>
-    <nav class="navbar">
+<body class="survey-body">
+    <nav class="navbar survey-navbar">
         <div class="container">
             <div class="nav-brand">
                 <span class="logo-badge">M</span>
@@ -22,12 +22,13 @@
     </nav>
 
     <div class="survey-page">
-        <div class="container">
+        <div class="survey-header">
             <h1>Earn from Surveys</h1>
-            <p class="survey-intro">Complete surveys and get paid automatically. Rewards are credited to your balance as soon as a survey is approved.</p>
-            <div id="surveyContainer" class="survey-frame-container">
-                <p class="empty-state">Loading surveys…</p>
-            </div>
+            <p class="survey-intro">Complete surveys and get paid automatically. Rewards are credited to your balance.</p>
+        </div>
+
+        <div id="surveyContainer" class="survey-frame-container">
+            <p class="empty-state">Loading surveys…</p>
         </div>
     </div>
 
@@ -64,10 +65,9 @@
                     <iframe
                         src="${url}"
                         class="survey-iframe"
-                        width="100%"
-                        height="2000"
                         frameborder="0"
-                        title="CPX Research Surveys">
+                        title="CPX Research Surveys"
+                        allow="clipboard-write">
                     </iframe>
                 `;
             } catch (err) {
