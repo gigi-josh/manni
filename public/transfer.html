@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transfer - MannieNG</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <span class="logo-badge">M</span>
+                <span>MannieNG</span>
+            </div>
+            <div class="nav-links">
+                <span class="user-welcome">Hi, <span id="username">…</span></span>
+                <a href="/dashboard" class="btn btn-outline">← Dashboard</a>
+                <button onclick="Auth.logout()" class="btn btn-outline">Logout</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="dashboard">
+        <div class="container">
+
+            <div class="dashboard-header">
+                <h1>Transfer to Bank</h1>
+                <p class="page-sub">Move your MannieNG balance to your Nigerian bank account.</p>
+            </div>
+
+            <!-- Window status banner -->
+            <div id="windowBanner" class="transfer-window-banner">
+                <i class="fas fa-hourglass-half"></i>
+                <div>
+                    <strong id="windowStatusText">Checking transfer window…</strong>
+                    <span id="windowSubText"></span>
+                </div>
+            </div>
+
+            <!-- Balance summary -->
+            <div class="transfer-balance-card">
+                <span class="transfer-balance-label">Available Balance</span>
+                <span class="transfer-balance-value" id="balance">₦0</span>
+            </div>
+
+            <!-- Transfer form -->
+            <div class="transfer-form-card">
+                <form id="transferForm">
+                    <div class="form-group">
+                        <label for="transferAmount">Amount (₦)</label>
+                        <input type="number"
+                               id="transferAmount"
+                               min="100"
+                               required
+                               placeholder="Enter amount">
+                        <small>Minimum: ₦100 · Maximum: your current balance</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="bankName">Bank Name</label>
+                        <select id="bankName" required>
+                            <option value="">Select Bank</option>
+                            <option value="GTBank">GTBank</option>
+                            <option value="Access Bank">Access Bank</option>
+                            <option value="First Bank">First Bank</option>
+                            <option value="Zenith Bank">Zenith Bank</option>
+                            <option value="UBA">UBA</option>
+                            <option value="Opay">Opay</option>
+                            <option value="PalmPay">PalmPay</option>
+                            <option value="Kuda">Kuda</option>
+                            <option value="Moniepoint">Moniepoint</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="accountNumber">Account Number</label>
+                        <input type="text"
+                               id="accountNumber"
+                               required
+                               placeholder="10-digit account number"
+                               pattern="\d{10}"
+                               maxlength="10"
+                               inputmode="numeric">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="accountName">Account Name (as it appears on your bank)</label>
+                        <input type="text"
+                               id="accountName"
+                               required
+                               placeholder="e.g. Joshua Giwa"
+                               maxlength="60">
+                    </div>
+
+                    <button type="submit"
+                            id="transferBtn"
+                            class="btn btn-primary btn-full">
+                        Submit Transfer
+                    </button>
+                </form>
+
+                <div id="transferMessage" class="message"></div>
+            </div>
+
+            <!-- Transfer history -->
+            <div class="transfer-history-card">
+                <h2>Transfer History</h2>
+                <div id="transferHistory">
+                    <p class="empty-state">Loading…</p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <footer>
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024 MannieNG. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- ================= TRANSFER AD MODAL (10-minute) ================= -->
+    <div class="modal-overlay" id="transferAdModal">
+        <div class="modal-card">
+            <h3>Please watch this ad to confirm your transfer</h3>
+            <p class="modal-sub">Your transfer will be submitted after the countdown ends.</p>
+
+            <div class="modal-ad-slot" id="transferAdSlot">
+                <script>
+                  atOptions = {
+                    'key' : '7330eeefe6ee702d2cfca77bd8a7ce0f',
+                    'format' : 'iframe',
+                    'height' : 250,
+                    'width' : 300,
+                    'params' : {}
+                  };
+                </script>
+                <script src="https://www.highrevenueformat.com/7330eeefe6ee702d2cfca77bd8a7ce0f/invoke.js"></script>
+            </div>
+
+            <div class="modal-timer" id="transferTimer">10:00</div>
+
+            <button id="confirmTransferBtn" class="btn btn-success btn-full" disabled>
+                Confirm Transfer
+            </button>
+            <button id="cancelTransferBtn" class="btn btn-outline btn-full" style="margin-top: 8px;">
+                Cancel
+            </button>
+        </div>
+    </div>
+
+    <script src="/js/main.js"></script>
+    <script src="/js/transfer.js"></script>
+</body>
+</html>
