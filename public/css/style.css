@@ -907,6 +907,120 @@ textarea {
     font-style: italic;
     margin-bottom: 8px;
 }
+/* ================= LEGAL PAGES (Privacy, Terms) ================= */
+.legal-page {
+    padding: 40px 0 60px;
+    background: var(--bg-light);
+    min-height: calc(100vh - 200px);
+}
+
+.legal-card {
+    background: var(--white);
+    padding: 40px 44px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    max-width: 800px;
+    margin: 0 auto;
+    line-height: 1.75;
+}
+
+.legal-card h1 {
+    font-size: clamp(1.6rem, 4vw, 2.2rem);
+    font-weight: 800;
+    margin-bottom: 8px;
+    color: var(--secondary);
+}
+
+.legal-updated {
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-style: italic;
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.legal-intro {
+    font-size: 1rem;
+    color: var(--secondary);
+    margin-bottom: 28px;
+}
+
+.legal-card h2 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-top: 28px;
+    margin-bottom: 10px;
+    color: var(--secondary);
+}
+
+.legal-card p {
+    color: #4A5568;
+    font-size: 0.95rem;
+    margin-bottom: 14px;
+}
+
+.legal-card ul {
+    margin: 12px 0 18px 24px;
+    padding-left: 0;
+}
+
+.legal-card li {
+    color: #4A5568;
+    font-size: 0.95rem;
+    margin-bottom: 8px;
+    line-height: 1.65;
+}
+
+.legal-card a {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.legal-card a:hover {
+    text-decoration: underline;
+}
+
+.legal-footer {
+    margin-top: 40px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.legal-footer .btn {
+    flex: 1;
+    min-width: 180px;
+}
+
+@media (max-width: 640px) {
+    .legal-page {
+        padding: 20px 0 40px;
+    }
+
+    .legal-card {
+        padding: 24px 20px;
+        border-radius: 8px;
+    }
+
+    .legal-card h1 {
+        font-size: 1.5rem;
+    }
+
+    .legal-card h2 {
+        font-size: 1.05rem;
+    }
+
+    .legal-footer {
+        flex-direction: column;
+    }
+
+    .legal-footer .btn {
+        width: 100%;
+    }
+}
 
 /* ================= TIMER ================= */
 .task-timer {
