@@ -22,20 +22,17 @@
 
             <!-- ================= SPONSORED BANNER (300x250) ================= -->
             <div class="ad-slot-inline">
-                <!--
-                    PASTE YOUR SPONSORED AD CODE HERE.
-
-                    Options:
-                    - AdSense 300×250 display unit
-                    - HilltopAds "MultiTag: In-page Push" zone
-                    - Monetag / Adsterra banner
-
-                    Placeholder below until you paste the real code:
-                -->
-                <div class="ad-placeholder">
-                    <i class="fas fa-bullhorn"></i>
-                    <span>Sponsored — 300×250</span>
-                </div>
+                <!-- Adsterra 300x250 banner -->
+                <script>
+                  atOptions = {
+                    'key' : '7330eeefe6ee702d2cfca77bd8a7ce0f',
+                    'format' : 'iframe',
+                    'height' : 250,
+                    'width' : 300,
+                    'params' : {}
+                  };
+                </script>
+                <script src="https://www.highrevenueformat.com/7330eeefe6ee702d2cfca77bd8a7ce0f/invoke.js"></script>
             </div>
 
             <!-- Countdown -->
@@ -53,37 +50,15 @@
         </div>
     </div>
 
-    <!-- ================= HILLTOPADS POPUNDER ================= -->
-    <!--
-        This popunder fires when the page loads.
-
-        Popunders are acceptable here because:
-        - The user explicitly clicked "Open Task"
-        - They expect to be shown a task/ad
-        - This page has no other purpose than ad exposure
-
-        Paste your HilltopAds Popunder code below (replacing the placeholder comment).
-    -->
-    <script>
-        (function (edg) {
-            var d = document,
-                s = d.createElement('script'),
-                l = d.currentScript || d.scripts[d.scripts.length - 1];
-            s.settings = edg || {};
-            s.src = "\/\/shameful-farm.com\/bfX.VTsPd\/Gjl\/0\/YEWJcc\/BeSmn9zu\/ZuUslqkSPNTNcM0wMuT-U\/5hO\/D\/kktANez\/QdxyNjTOkh5tMvwc";
-            s.async = true;
-            s.referrerPolicy = 'no-referrer-when-downgrade';
-            l.parentNode.insertBefore(s, l);
-        })({});
-    </script>
+    <!-- ================= ADSTERRA POPUNDER ================= -->
+    <script src="https://pl31287847.profitableratecpmnetwork.com/45/6c/f2/456cf2a7c0671bb8bdb1924b6cee4621.js"></script>
 
     <script>
         // ================= COUNTDOWN =================
         const params = new URLSearchParams(window.location.search);
         const taskUrl = params.get('url') || '';
-        const taskId = window.location.pathname.split('/').pop();
 
-        // Whitelist: only open http/https URLs, and only from a known set of domains (optional)
+        // Only allow http/https URLs
         const isSafeUrl = (u) => {
             if (!u) return false;
             try {
@@ -107,7 +82,6 @@
             if (seconds <= 0) {
                 clearInterval(tick);
 
-                // Hide the countdown number, show ✅
                 countdownEl.parentElement.innerHTML = '<span style="font-size: 1.3rem;">✅ Ready</span>';
 
                 continueBtn.disabled = false;
@@ -116,7 +90,6 @@
                     if (destination) {
                         window.open(destination, '_blank', 'noopener,noreferrer');
                     }
-                    // Return to dashboard after opening
                     window.location.href = '/dashboard';
                 };
             }
