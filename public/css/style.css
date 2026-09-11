@@ -1372,6 +1372,30 @@ textarea {
 .modal-timer.timer-ready {
     color: var(--success);
 }
+.transfer-rule-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--primary-light);
+    border: 1px solid #FFD4B3;
+    border-radius: var(--radius-sm);
+    margin-top: 14px;
+    font-size: 0.85rem;
+    color: #8A4A00;
+    line-height: 1.4;
+}
+
+.transfer-rule-note i {
+    color: var(--primary);
+    font-size: 1rem;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.transfer-rule-note strong {
+    color: var(--primary-dark);
+}
 
 /* ================= FOOTER ================= */
 footer {
