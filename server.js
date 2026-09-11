@@ -16,7 +16,37 @@ const users = [];
 const taskProgress = [];
 const withdrawalRequests = [];
 const withdrawStarts = {};
-const cpxTransactions = new Map(); // trans_id -> { userId, amount, reversed }
+const cpxTransactions = new Map();
+
+// ---------- Transfer window rule ----------
+// Transfers only allowed on days 1–5 of each month
+const TRANSFER_WINDOW_START_DAY = 1;
+const TRANSFER_WINDOW_END_DAY = 5;
+
+function isTransferWindowOpen() {
+    const day = new Date().getDate();
+    return day >= TRANSFER_WINDOW_START_DAY && day <= TRANSFER_WINDOW_END_DAY;
+}
+
+function nextTransferWindowStart() {
+    const now = new Date();
+    const day = now.getDate();
+
+    if (day >= TRANSFER_WINDOW_START_DAY && day <= TRANSFER_WINDOW_END_DAY) {
+        return now; // window is open now
+    }
+
+    // Next 1st of the month
+    return new Date(now.getFullYear(), now.getMonth() + 1, TRANSFER_WINDOW_START_DAY);
+}
+
+function formatWindowDate(date) {
+    return date.toLocaleDateString('en-NG', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+    });
+}
 
 // ---------- Sample tasks with verification rules ----------
 const sampleTasks = [
@@ -111,6 +141,7 @@ app.get('/register', (req, res) => res.sendFile(path.join(__dirname, 'public', '
 app.get('/ad/:taskId', (req, res) => res.sendFile(path.join(__dirname, 'public', 'ad.html')));
 app.get('/surveys', (req, res) => res.sendFile(path.join(__dirname, 'public', 'surveys.html')));
 app.get('/privacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privacy.html')));
+app.get('/transfer', (req, res) => res.sendFile(path.join(__dirname, 'public', 'transfer.html')));
 
 // ==================== AUTH ====================
 
@@ -330,10 +361,34 @@ app.post('/api/tasks/complete', (req, res) => {
     });
 });
 
-// ==================== WITHDRAWALS ====================
+// ==================== TRANSFERS ====================
 
+// Public endpoint: check if transfer window is open
+app.get('/api/withdraw/window', (req, res) => {
+    const open = isTransferWindowOpen();
+    const next = nextTransferWindowStart();
+
+    res.json({
+        open,
+        nextWindow: next.toISOString(),
+        nextWindowLabel: formatWindowDate(next),
+        windowStartDay: TRANSFER_WINDOW_START_DAY,
+        windowEndDay: TRANSFER_WINDOW_END_DAY
+    });
+});
+
+// Starts the ad-watch timer (must be called before submitting a transfer)
 app.post('/api/withdraw/start', (req, res) => {
     const { userId } = req.body;
+
+    // Reject early if window is closed
+    if (!isTransferWindowOpen()) {
+        const next = nextTransferWindowStart();
+        return res.status(403).json({
+            error: `Transfers are only available from the ${TRANSFER_WINDOW_START_DAY}th to the ${TRANSFER_WINDOW_END_DAY}th of each month. Next window opens on ${formatWindowDate(next)}.`
+        });
+    }
+
     const user = findUser(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -344,12 +399,21 @@ app.post('/api/withdraw/start', (req, res) => {
 app.post('/api/withdraw', (req, res) => {
     const { userId, amount, bankName, accountNumber } = req.body;
 
+    // ---- Rule: transfers only allowed days 1–5 ----
+    if (!isTransferWindowOpen()) {
+        const next = nextTransferWindowStart();
+        return res.status(403).json({
+            error: `Transfers are only available from the ${TRANSFER_WINDOW_START_DAY}th to the ${TRANSFER_WINDOW_END_DAY}th of each month. Next window opens on ${formatWindowDate(next)}.`
+        });
+    }
+
     const user = findUser(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
+    // ---- Enforce ad watch ----
     const startedAt = withdrawStarts[userId];
     if (!startedAt) {
-        return res.status(400).json({ error: 'Withdrawal session not started' });
+        return res.status(400).json({ error: 'Transfer session not started' });
     }
     const elapsed = (Date.now() - startedAt) / 1000;
     if (elapsed < 600) {
@@ -361,7 +425,7 @@ app.post('/api/withdraw', (req, res) => {
 
     const amt = parseInt(amount);
     if (!amt || amt < 100) {
-        return res.status(400).json({ error: 'Minimum withdrawal is ₦100' });
+        return res.status(400).json({ error: 'Minimum transfer is ₦100' });
     }
     if (user.balance < amt) {
         return res.status(400).json({ error: 'Insufficient balance' });
@@ -373,6 +437,7 @@ app.post('/api/withdraw', (req, res) => {
         return res.status(400).json({ error: 'Account number must be 10 digits' });
     }
 
+    // TODO: integrate Flutterwave / Paystack here
     user.balance -= amt;
 
     withdrawalRequests.push({
@@ -386,7 +451,7 @@ app.post('/api/withdraw', (req, res) => {
     });
 
     res.json({
-        message: 'Withdrawal request submitted!',
+        message: 'Transfer request submitted!',
         amount: amt,
         newBalance: user.balance,
         bankName,
@@ -408,8 +473,6 @@ app.get('/api/withdrawals/:userId', (req, res) => {
 
 // ==================== CPX RESEARCH ====================
 
-// Generates the secure hash for the survey iframe URL
-// Format per CPX: md5(userId + "-" + SECURE_HASH)
 app.get('/api/cpx-hash/:userId', (req, res) => {
     const userId = parseInt(req.params.userId);
     const user = findUser(userId);
@@ -433,9 +496,7 @@ app.get('/api/cpx-hash/:userId', (req, res) => {
     });
 });
 
-// CPX calls this when a user completes (or a transaction is reversed)
 app.all('/api/cpx-webhook', (req, res) => {
-    // CPX may POST or GET depending on config — handle both
     const params = { ...req.query, ...req.body };
 
     const {
@@ -451,14 +512,11 @@ app.all('/api/cpx-webhook', (req, res) => {
 
     console.log('CPX webhook received:', params);
 
-    // Basic presence check
     if (!trans_id || !user_id) {
         return res.status(400).json({ error: 'Missing trans_id or user_id' });
     }
 
     // ---- Validate hash: md5(trans_id + "-" + SECURE_HASH) ----
-    // Note: CPX spec is `md5({trans_id}-yourappsecurehash)` but some setups omit the dash.
-    // We try both to be safe.
     if (process.env.CPX_SECURE_HASH && hash) {
         const withDash = crypto.createHash('md5')
             .update(`${trans_id}-${process.env.CPX_SECURE_HASH}`)
@@ -494,17 +552,15 @@ app.all('/api/cpx-webhook', (req, res) => {
         return res.json({ ok: true, reversed: true });
     }
 
-    // ---- Only credit on complete (status = 1 or "1") ----
+    // ---- Only credit on complete (status = 1) ----
     if (String(status) !== '1') {
         return res.json({ ok: true, message: 'Ignored non-complete status' });
     }
 
-    // ---- Prevent double credit ----
     if (cpxTransactions.has(trans_id)) {
         return res.json({ ok: true, message: 'Already processed' });
     }
 
-    // ---- Credit ----
     cpxTransactions.set(trans_id, { userId: user.id, amount: reward, reversed: false });
     user.balance += reward;
     user.tasksCompleted += 1;
@@ -599,11 +655,55 @@ app.get('/api/admin/users', (req, res) => {
     res.json(users.map(sanitizeUser));
 });
 
+// Admin: manually process a pending transfer (mark as paid/failed)
+app.post('/api/admin/transfer', (req, res) => {
+    const { adminKey, transferId, status, note } = req.body;
+
+    if (adminKey !== process.env.ADMIN_KEY) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const transfer = withdrawalRequests.find(w => w.id === parseInt(transferId));
+    if (!transfer) return res.status(404).json({ error: 'Transfer not found' });
+
+    if (!['processing', 'paid', 'failed'].includes(status)) {
+        return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    transfer.status = status;
+    transfer.processedAt = new Date().toISOString();
+    transfer.adminNote = note || null;
+
+    // If failed, refund the user
+    if (status === 'failed') {
+        const user = findUser(transfer.userId);
+        if (user) user.balance += transfer.amount;
+    }
+
+    res.json({ ok: true, transfer });
+});
+
+// Admin: list all transfers
+app.get('/api/admin/transfers', (req, res) => {
+    const { adminKey } = req.query;
+    if (adminKey !== process.env.ADMIN_KEY) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const list = [...withdrawalRequests].sort(
+        (a, b) => new Date(b.requestedAt) - new Date(a.requestedAt)
+    );
+
+    res.json(list);
+});
+
 // ==================== START ====================
 
 app.listen(PORT, () => {
     console.log(`MannieNG server running on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`Transfer window: day ${TRANSFER_WINDOW_START_DAY}–${TRANSFER_WINDOW_END_DAY} of each month`);
+    console.log(`Currently ${isTransferWindowOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
     if (!process.env.ADMIN_KEY) {
         console.warn('⚠️  ADMIN_KEY not set — admin endpoints will reject all requests');
     }
