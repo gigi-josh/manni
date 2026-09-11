@@ -14,6 +14,7 @@ app.use(express.static('public'));
 const users = [];
 const taskProgress = [];
 const withdrawalRequests = [];
+const withdrawStarts = {}; // { userId: timestamp }
 
 // ---------- Sample tasks with verification rules ----------
 const sampleTasks = [
@@ -106,6 +107,7 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'public', 'dashboard.html')));
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 app.get('/register', (req, res) => res.sendFile(path.join(__dirname, 'public', 'register.html')));
+app.get('/ad/:taskId', (req, res) => res.sendFile(path.join(__dirname, 'public', 'ad.html')));
 
 // ==================== AUTH ====================
 
@@ -155,7 +157,6 @@ app.post('/api/register', async (req, res) => {
 
     users.push(user);
 
-    // Initialize progress for all tasks
     sampleTasks.forEach(task => {
         taskProgress.push({
             userId: user.id,
@@ -203,7 +204,6 @@ app.get('/api/user/:id', (req, res) => {
 
 // ==================== TASKS ====================
 
-// Get all tasks for a user with their current status
 app.get('/api/tasks/:userId', (req, res) => {
     const userId = parseInt(req.params.userId);
     const user = findUser(userId);
@@ -223,7 +223,6 @@ app.get('/api/tasks/:userId', (req, res) => {
     res.json(tasksWithStatus);
 });
 
-// Start a task (must be called before complete)
 app.post('/api/tasks/start', (req, res) => {
     const { userId, taskId } = req.body;
 
@@ -245,7 +244,6 @@ app.post('/api/tasks/start', (req, res) => {
     }
 
     if (progress.status === 'started') {
-        // Already started — just return current state
         return res.json({
             message: 'Task already started',
             startedAt: progress.startedAt,
@@ -263,7 +261,6 @@ app.post('/api/tasks/start', (req, res) => {
     });
 });
 
-// Complete a task (with verification)
 app.post('/api/tasks/complete', (req, res) => {
     const { userId, taskId, proofUrl } = req.body;
 
@@ -276,7 +273,6 @@ app.post('/api/tasks/complete', (req, res) => {
     const progress = findProgress(userId, taskId);
     if (!progress) return res.status(404).json({ error: 'Task not found for user' });
 
-    // ---- Guard: already done ----
     if (progress.status === 'completed') {
         return res.status(400).json({ error: 'Task already completed' });
     }
@@ -284,19 +280,16 @@ app.post('/api/tasks/complete', (req, res) => {
         return res.status(400).json({ error: 'Task awaiting admin approval' });
     }
 
-    // ---- Guard: rate limit ----
     if (recentCompletionCount(userId) >= RATE_LIMIT_PER_HOUR) {
         return res.status(429).json({
             error: `Too many completions. Max ${RATE_LIMIT_PER_HOUR} per hour. Try again later.`
         });
     }
 
-    // ---- Guard: must have started ----
     if (progress.status !== 'started' || !progress.startedAt) {
         return res.status(400).json({ error: 'You must start this task first' });
     }
 
-    // ---- Guard: timed verification ----
     if (task.verification === 'timed' && task.minSeconds > 0) {
         const elapsed = (Date.now() - new Date(progress.startedAt).getTime()) / 1000;
         if (elapsed < task.minSeconds) {
@@ -306,7 +299,6 @@ app.post('/api/tasks/complete', (req, res) => {
         }
     }
 
-    // ---- Proof/admin verification ----
     if (task.verification === 'proof' || task.verification === 'admin') {
         if (!proofUrl || typeof proofUrl !== 'string' || proofUrl.trim().length < 10) {
             return res.status(400).json({
@@ -318,7 +310,6 @@ app.post('/api/tasks/complete', (req, res) => {
         progress.proofUrl = proofUrl.trim();
         progress.completedAt = new Date().toISOString();
 
-        // Move reward to pending balance (doesn't count as withdrawable)
         user.pendingBalance = (user.pendingBalance || 0) + task.reward;
 
         return res.json({
@@ -329,7 +320,6 @@ app.post('/api/tasks/complete', (req, res) => {
         });
     }
 
-    // ---- Timed tasks auto-approve ----
     progress.status = 'completed';
     progress.completedAt = new Date().toISOString();
     user.balance += task.reward;
@@ -344,11 +334,33 @@ app.post('/api/tasks/complete', (req, res) => {
 
 // ==================== WITHDRAWALS ====================
 
+app.post('/api/withdraw/start', (req, res) => {
+    const { userId } = req.body;
+    const user = findUser(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    withdrawStarts[userId] = Date.now();
+    res.json({ ok: true, minSeconds: 600 });
+});
+
 app.post('/api/withdraw', (req, res) => {
     const { userId, amount, bankName, accountNumber } = req.body;
 
     const user = findUser(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // ---- Enforce ad watch ----
+    const startedAt = withdrawStarts[userId];
+    if (!startedAt) {
+        return res.status(400).json({ error: 'Withdrawal session not started' });
+    }
+    const elapsed = (Date.now() - startedAt) / 1000;
+    if (elapsed < 600) {
+        return res.status(400).json({
+            error: `You must watch the ad for ${Math.ceil(600 - elapsed)}s more.`
+        });
+    }
+    delete withdrawStarts[userId];
 
     const amt = parseInt(amount);
     if (!amt || amt < 100) {
@@ -403,7 +415,6 @@ app.get('/api/withdrawals/:userId', (req, res) => {
 
 // ==================== ADMIN ====================
 
-// List all pending tasks awaiting review
 app.get('/api/admin/pending', (req, res) => {
     const { adminKey } = req.query;
     if (adminKey !== process.env.ADMIN_KEY) {
@@ -430,7 +441,6 @@ app.get('/api/admin/pending', (req, res) => {
     res.json(pending);
 });
 
-// Approve or reject a pending submission
 app.post('/api/admin/review', (req, res) => {
     const { adminKey, userId, taskId, approve, note } = req.body;
 
@@ -449,7 +459,6 @@ app.post('/api/admin/review', (req, res) => {
         return res.status(404).json({ error: 'Task or user not found' });
     }
 
-    // Remove reward from pending balance
     user.pendingBalance = Math.max(0, (user.pendingBalance || 0) - task.reward);
 
     if (approve) {
@@ -481,7 +490,6 @@ app.post('/api/admin/review', (req, res) => {
     }
 });
 
-// List all users (admin)
 app.get('/api/admin/users', (req, res) => {
     const { adminKey } = req.query;
     if (adminKey !== process.env.ADMIN_KEY) {
