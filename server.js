@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const path = require('path');
 require('dotenv').config();
 
@@ -14,7 +15,8 @@ app.use(express.static('public'));
 const users = [];
 const taskProgress = [];
 const withdrawalRequests = [];
-const withdrawStarts = {}; // { userId: timestamp }
+const withdrawStarts = {};
+const cpxTransactions = new Map(); // trans_id -> { userId, amount, reversed }
 
 // ---------- Sample tasks with verification rules ----------
 const sampleTasks = [
@@ -89,7 +91,6 @@ function sanitizeUser(user) {
     return safe;
 }
 
-// Rate limit: max completions per hour
 const RATE_LIMIT_PER_HOUR = 10;
 
 function recentCompletionCount(userId) {
@@ -108,6 +109,8 @@ app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'public', 
 app.get('/login', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 app.get('/register', (req, res) => res.sendFile(path.join(__dirname, 'public', 'register.html')));
 app.get('/ad/:taskId', (req, res) => res.sendFile(path.join(__dirname, 'public', 'ad.html')));
+app.get('/surveys', (req, res) => res.sendFile(path.join(__dirname, 'public', 'surveys.html')));
+app.get('/privacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privacy.html')));
 
 // ==================== AUTH ====================
 
@@ -117,11 +120,9 @@ app.post('/api/register', async (req, res) => {
     if (!username || !email || !password || !phone) {
         return res.status(400).json({ error: 'All fields are required' });
     }
-
     if (username.length < 3) {
         return res.status(400).json({ error: 'Username must be at least 3 characters' });
     }
-
     if (password.length < 6) {
         return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
@@ -238,11 +239,9 @@ app.post('/api/tasks/start', (req, res) => {
     if (progress.status === 'completed') {
         return res.status(400).json({ error: 'Task already completed' });
     }
-
     if (progress.status === 'pending') {
         return res.status(400).json({ error: 'Task awaiting admin approval' });
     }
-
     if (progress.status === 'started') {
         return res.json({
             message: 'Task already started',
@@ -309,7 +308,6 @@ app.post('/api/tasks/complete', (req, res) => {
         progress.status = 'pending';
         progress.proofUrl = proofUrl.trim();
         progress.completedAt = new Date().toISOString();
-
         user.pendingBalance = (user.pendingBalance || 0) + task.reward;
 
         return res.json({
@@ -349,7 +347,6 @@ app.post('/api/withdraw', (req, res) => {
     const user = findUser(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // ---- Enforce ad watch ----
     const startedAt = withdrawStarts[userId];
     if (!startedAt) {
         return res.status(400).json({ error: 'Withdrawal session not started' });
@@ -366,20 +363,16 @@ app.post('/api/withdraw', (req, res) => {
     if (!amt || amt < 100) {
         return res.status(400).json({ error: 'Minimum withdrawal is ₦100' });
     }
-
     if (user.balance < amt) {
         return res.status(400).json({ error: 'Insufficient balance' });
     }
-
     if (!bankName || typeof bankName !== 'string') {
         return res.status(400).json({ error: 'Bank name is required' });
     }
-
     if (!/^\d{10}$/.test(accountNumber)) {
         return res.status(400).json({ error: 'Account number must be 10 digits' });
     }
 
-    // TODO: integrate Flutterwave / Paystack here
     user.balance -= amt;
 
     withdrawalRequests.push({
@@ -411,6 +404,114 @@ app.get('/api/withdrawals/:userId', (req, res) => {
         .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
 
     res.json(list);
+});
+
+// ==================== CPX RESEARCH ====================
+
+// Generates the secure hash for the survey iframe URL
+// Format per CPX: md5(userId + "-" + SECURE_HASH)
+app.get('/api/cpx-hash/:userId', (req, res) => {
+    const userId = parseInt(req.params.userId);
+    const user = findUser(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    if (!process.env.CPX_SECURE_HASH) {
+        return res.status(500).json({ error: 'CPX hash not configured' });
+    }
+
+    const hash = crypto
+        .createHash('md5')
+        .update(`${userId}-${process.env.CPX_SECURE_HASH}`)
+        .digest('hex');
+
+    res.json({
+        appId: process.env.CPX_APP_ID,
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+        hash
+    });
+});
+
+// CPX calls this when a user completes (or a transaction is reversed)
+app.all('/api/cpx-webhook', (req, res) => {
+    // CPX may POST or GET depending on config — handle both
+    const params = { ...req.query, ...req.body };
+
+    const {
+        status,
+        trans_id,
+        user_id,
+        amount_local,
+        amount_usd,
+        hash,
+        ip_click,
+        type
+    } = params;
+
+    console.log('CPX webhook received:', params);
+
+    // Basic presence check
+    if (!trans_id || !user_id) {
+        return res.status(400).json({ error: 'Missing trans_id or user_id' });
+    }
+
+    // ---- Validate hash: md5(trans_id + "-" + SECURE_HASH) ----
+    // Note: CPX spec is `md5({trans_id}-yourappsecurehash)` but some setups omit the dash.
+    // We try both to be safe.
+    if (process.env.CPX_SECURE_HASH && hash) {
+        const withDash = crypto.createHash('md5')
+            .update(`${trans_id}-${process.env.CPX_SECURE_HASH}`)
+            .digest('hex');
+        const noDash = crypto.createHash('md5')
+            .update(`${trans_id}${process.env.CPX_SECURE_HASH}`)
+            .digest('hex');
+
+        if (hash !== withDash && hash !== noDash) {
+            console.warn('CPX webhook: invalid hash for trans', trans_id);
+            return res.status(403).json({ error: 'Invalid hash' });
+        }
+    }
+
+    const user = findUser(user_id);
+    if (!user) {
+        console.warn('CPX webhook: user not found', user_id);
+        return res.status(404).json({ error: 'User not found' });
+    }
+
+    const reward = Math.round(parseFloat(amount_local || '0') || 0);
+
+    // ---- Handle reversal (status = 2) ----
+    if (String(status) === '2') {
+        const existing = cpxTransactions.get(trans_id);
+        if (existing && !existing.reversed) {
+            user.balance = Math.max(0, user.balance - existing.amount);
+            user.tasksCompleted = Math.max(0, user.tasksCompleted - 1);
+            existing.reversed = true;
+            cpxTransactions.set(trans_id, existing);
+            console.log(`CPX: reversed ₦${existing.amount} from ${user.username} (trans ${trans_id})`);
+        }
+        return res.json({ ok: true, reversed: true });
+    }
+
+    // ---- Only credit on complete (status = 1 or "1") ----
+    if (String(status) !== '1') {
+        return res.json({ ok: true, message: 'Ignored non-complete status' });
+    }
+
+    // ---- Prevent double credit ----
+    if (cpxTransactions.has(trans_id)) {
+        return res.json({ ok: true, message: 'Already processed' });
+    }
+
+    // ---- Credit ----
+    cpxTransactions.set(trans_id, { userId: user.id, amount: reward, reversed: false });
+    user.balance += reward;
+    user.tasksCompleted += 1;
+
+    console.log(`CPX: credited ₦${reward} to ${user.username} (trans ${trans_id})`);
+
+    res.json({ ok: true, credited: reward });
 });
 
 // ==================== ADMIN ====================
@@ -495,7 +596,6 @@ app.get('/api/admin/users', (req, res) => {
     if (adminKey !== process.env.ADMIN_KEY) {
         return res.status(403).json({ error: 'Forbidden' });
     }
-
     res.json(users.map(sanitizeUser));
 });
 
@@ -506,5 +606,8 @@ app.listen(PORT, () => {
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     if (!process.env.ADMIN_KEY) {
         console.warn('⚠️  ADMIN_KEY not set — admin endpoints will reject all requests');
+    }
+    if (!process.env.CPX_APP_ID || !process.env.CPX_SECURE_HASH) {
+        console.warn('⚠️  CPX env vars not set — surveys will not work');
     }
 });
