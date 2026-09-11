@@ -76,6 +76,12 @@ textarea {
     padding: 0 20px;
 }
 
+.page-sub {
+    color: var(--accent);
+    font-size: 0.92rem;
+    margin-top: 4px;
+}
+
 /* ================= NAVBAR ================= */
 .navbar {
     background: var(--white);
@@ -128,7 +134,7 @@ textarea {
 .nav-links {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 16px;
     flex-wrap: wrap;
 }
 
@@ -315,7 +321,6 @@ textarea {
     margin-bottom: 14px;
 }
 
-/* Banner 300x250 slot — centered, sized to fit exactly */
 .ad-banner-slot {
     display: flex;
     align-items: center;
@@ -333,21 +338,6 @@ textarea {
 .ad-banner-slot > * {
     max-width: 100%;
     max-height: 100%;
-}
-
-/* Legacy container — kept for reference, not used */
-.ad-video-block {
-    max-width: 300px;
-    width: 100%;
-    min-height: 250px;
-    margin: 0 auto;
-    background: var(--white);
-    border-radius: var(--radius);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    padding: 10px;
 }
 
 .ad-placeholder {
@@ -470,7 +460,7 @@ textarea {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px 16px 90px;
+    padding: 24px 16px 130px;
     background: linear-gradient(135deg, var(--primary-light) 0%, #FFE8D6 100%);
 }
 
@@ -529,13 +519,14 @@ textarea {
     right: 0;
     background: var(--white);
     box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.12);
-    padding: 8px 16px;
+    padding: 10px 16px;
     z-index: 999;
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 80px;
     max-height: 120px;
+    overflow: hidden;
 }
 
 .ground-banner-content {
@@ -664,113 +655,13 @@ textarea {
 .dashboard-header h1 {
     font-size: clamp(1.5rem, 3vw, 2rem);
     font-weight: 700;
-    margin-bottom: 20px;
+    margin-bottom: 6px;
 }
 
 .dashboard-stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 16px;
-}
-.survey-cta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    flex-wrap: wrap;
-    background: linear-gradient(135deg, var(--primary) 0%, #FF8C42 100%);
-    color: var(--white);
-    padding: 20px 24px;
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    margin-bottom: 28px;
-}
-
-.survey-cta-content {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    min-width: 0;
-    flex: 1;
-}
-
-.survey-cta-content i {
-    font-size: 2rem;
-    flex-shrink: 0;
-}
-
-.survey-cta-content h3 {
-    font-size: 1.15rem;
-    font-weight: 700;
-    margin-bottom: 2px;
-}
-
-.survey-cta-content p {
-    font-size: 0.9rem;
-    opacity: 0.9;
-}
-
-.survey-cta .btn {
-    background: var(--white);
-    color: var(--primary);
-    border-color: var(--white);
-    flex-shrink: 0;
-}
-
-.survey-cta .btn:hover {
-    background: var(--primary-light);
-    border-color: var(--primary-light);
-}
-
-/* Survey page */
-.survey-page {
-    padding: 32px 0 60px;
-}
-
-.survey-page h1 {
-    font-size: clamp(1.5rem, 3vw, 2rem);
-    font-weight: 700;
-    margin-bottom: 8px;
-}
-
-.survey-intro {
-    color: var(--accent);
-    margin-bottom: 24px;
-    font-size: 0.95rem;
-}
-
-.survey-frame-container {
-    background: var(--white);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-sm);
-    overflow: hidden;
-    min-height: 600px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-}
-
-.survey-iframe {
-    width: 100%;
-    border: none;
-    display: block;
-    min-height: 900px;
-}
-
-@media (max-width: 640px) {
-    .survey-cta {
-        flex-direction: column;
-        align-items: stretch;
-        text-align: center;
-    }
-    .survey-cta-content {
-        flex-direction: column;
-        text-align: center;
-    }
-    .survey-cta .btn {
-        width: 100%;
-    }
 }
 
 .stat-card {
@@ -842,7 +733,7 @@ textarea {
 .withdraw-section h2 {
     font-size: 1.2rem;
     font-weight: 700;
-    margin-bottom: 18px;
+    margin-bottom: 12px;
 }
 
 .withdraw-section h3 {
@@ -1045,6 +936,216 @@ textarea {
     font-variant-numeric: tabular-nums;
 }
 
+/* ================= SURVEY CTA ================= */
+.survey-cta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+    background: linear-gradient(135deg, var(--primary) 0%, #FF8C42 100%);
+    color: var(--white);
+    padding: 20px 24px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 28px;
+}
+
+.survey-cta-content {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+    flex: 1;
+}
+
+.survey-cta-content i {
+    font-size: 2rem;
+    flex-shrink: 0;
+}
+
+.survey-cta-content h3 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 2px;
+}
+
+.survey-cta-content p {
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+.survey-cta .btn {
+    background: var(--white);
+    color: var(--primary);
+    border-color: var(--white);
+    flex-shrink: 0;
+}
+
+.survey-cta .btn:hover {
+    background: var(--primary-light);
+    border-color: var(--primary-light);
+}
+
+/* ================= SURVEY PAGE ================= */
+.survey-body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background: var(--bg-light);
+}
+
+.survey-navbar {
+    flex-shrink: 0;
+}
+
+.survey-page {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 20px 20px;
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+    min-height: 0;
+}
+
+.survey-header {
+    flex-shrink: 0;
+    margin-bottom: 14px;
+}
+
+.survey-header h1 {
+    font-size: clamp(1.3rem, 3vw, 1.75rem);
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.survey-intro {
+    color: var(--accent);
+    font-size: 0.9rem;
+}
+
+.survey-frame-container {
+    flex: 1;
+    min-height: 0;
+    background: var(--white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    display: flex;
+    align-items: stretch;
+    justify-content: stretch;
+}
+
+.survey-frame-container .empty-state {
+    align-self: center;
+    margin: auto;
+}
+
+.survey-iframe {
+    width: 100%;
+    height: 100%;
+    min-height: 600px;
+    border: none;
+    display: block;
+}
+
+/* ================= TRANSFER PAGE ================= */
+.transfer-window-banner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    border-radius: var(--radius);
+    margin-bottom: 20px;
+    font-size: 0.95rem;
+    box-shadow: var(--shadow-sm);
+}
+
+.transfer-window-banner i {
+    font-size: 1.6rem;
+    flex-shrink: 0;
+}
+
+.transfer-window-banner strong {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 2px;
+}
+
+.transfer-window-banner span {
+    display: block;
+    font-size: 0.85rem;
+    opacity: 0.85;
+}
+
+.transfer-window-banner.window-open {
+    background: var(--success-light);
+    color: #22543D;
+    border: 1px solid #9AE6B4;
+}
+
+.transfer-window-banner.window-open i {
+    color: var(--success);
+}
+
+.transfer-window-banner.window-closed {
+    background: var(--danger-light);
+    color: #822727;
+    border: 1px solid #FEB2B2;
+}
+
+.transfer-window-banner.window-closed i {
+    color: var(--danger);
+}
+
+.transfer-balance-card {
+    background: linear-gradient(135deg, var(--primary) 0%, #FF8C42 100%);
+    color: var(--white);
+    padding: 24px 28px;
+    border-radius: var(--radius);
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.transfer-balance-label {
+    font-size: 0.85rem;
+    opacity: 0.9;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.transfer-balance-value {
+    font-size: 2rem;
+    font-weight: 800;
+}
+
+.transfer-form-card {
+    background: var(--white);
+    padding: 24px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 24px;
+}
+
+.transfer-history-card {
+    background: var(--white);
+    padding: 24px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+}
+
+.transfer-history-card h2 {
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+}
+
 /* ================= WITHDRAW ================= */
 .withdraw-card {
     background: var(--bg-light);
@@ -1198,7 +1299,7 @@ textarea {
     color: var(--primary);
 }
 
-/* ================= MODAL (Withdraw Ad) ================= */
+/* ================= MODAL (Withdraw/Transfer Ad) ================= */
 .modal-overlay {
     position: fixed;
     inset: 0;
@@ -1371,7 +1472,7 @@ footer {
     }
 
     .nav-links {
-        gap: 12px;
+        gap: 10px;
     }
 
     .nav-links a {
@@ -1399,13 +1500,8 @@ footer {
     }
 
     .auth-container {
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px 16px 130px; /* was 90px — bumped for taller banner */
-    background: linear-gradient(135deg, var(--primary-light) 0%, #FFE8D6 100%);
-}
+        padding: 20px 14px 130px;
+    }
 
     .auth-card {
         padding: 28px 20px;
@@ -1442,6 +1538,66 @@ footer {
     .ground-banner-img {
         max-height: 50px;
     }
+
+    .survey-cta {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: center;
+    }
+
+    .survey-cta-content {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .survey-cta .btn {
+        width: 100%;
+    }
+
+    .survey-page {
+        padding: 10px 12px 12px;
+    }
+
+    .survey-header h1 {
+        font-size: 1.2rem;
+    }
+
+    .survey-intro {
+        font-size: 0.82rem;
+    }
+
+    .survey-frame-container {
+        border-radius: 8px;
+    }
+
+    .survey-iframe {
+        min-height: 500px;
+    }
+
+    .transfer-window-banner {
+        padding: 14px 16px;
+        font-size: 0.88rem;
+        flex-direction: column;
+        text-align: center;
+        gap: 8px;
+    }
+
+    .transfer-window-banner i {
+        font-size: 1.4rem;
+    }
+
+    .transfer-balance-card {
+        padding: 20px 22px;
+    }
+
+    .transfer-balance-value {
+        font-size: 1.6rem;
+    }
+
+    .transfer-form-card,
+    .transfer-history-card {
+        padding: 18px;
+    }
 }
 
 @media (max-width: 420px) {
@@ -1450,8 +1606,8 @@ footer {
     }
 
     .nav-links .btn {
-        padding: 8px 16px;
-        font-size: 0.85rem;
+        padding: 8px 14px;
+        font-size: 0.8rem;
     }
 
     .hero-content h1 {
@@ -1473,5 +1629,13 @@ footer {
 
     .modal-timer {
         font-size: 1.3rem;
+    }
+
+    .transfer-balance-card {
+        padding: 18px 20px;
+    }
+
+    .transfer-balance-value {
+        font-size: 1.4rem;
     }
 }
