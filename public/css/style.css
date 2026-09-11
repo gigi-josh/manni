@@ -534,7 +534,8 @@ textarea {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 60px;
+    min-height: 80px;
+    max-height: 120px;
 }
 
 .ground-banner-content {
@@ -1298,8 +1299,13 @@ footer {
     }
 
     .auth-container {
-        padding: 20px 14px 90px;
-    }
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px 130px; /* was 90px — bumped for taller banner */
+    background: linear-gradient(135deg, var(--primary-light) 0%, #FFE8D6 100%);
+}
 
     .auth-card {
         padding: 28px 20px;
