@@ -24,7 +24,6 @@
 
     <div class="dashboard">
         <div class="container">
-            <!-- Header + Stats -->
             <div class="dashboard-header">
                 <h1>Your Dashboard</h1>
                 <div class="dashboard-stats">
@@ -59,9 +58,7 @@
                 </div>
             </div>
 
-            <!-- Main content grid -->
             <div class="dashboard-content">
-                <!-- Tasks -->
                 <div class="tasks-section">
                     <h2>Available Tasks</h2>
                     <div id="tasksContainer" class="tasks-grid">
@@ -69,7 +66,6 @@
                     </div>
                 </div>
 
-                <!-- Withdraw -->
                 <div class="withdraw-section">
                     <h2>Withdraw Earnings</h2>
                     <div class="withdraw-card">
@@ -135,15 +131,17 @@
             <p class="modal-sub">Your withdrawal will be processed after the countdown ends.</p>
 
             <div class="modal-ad-slot" id="withdrawAdSlot">
-                <!--
-                    Option A: Self-hosted video loop
-                    Option B: Paste an Adsterra / AdSense iframe here instead
-                -->
-                <video id="adVideo" autoplay muted loop playsinline>
-                    <source src="/ads/withdraw-ad.mp4" type="video/mp4">
-                    <!-- Fallback if no video file exists -->
-                    Your browser does not support video.
-                </video>
+                <!-- Adsterra 300x250 banner -->
+                <script>
+                  atOptions = {
+                    'key' : '7330eeefe6ee702d2cfca77bd8a7ce0f',
+                    'format' : 'iframe',
+                    'height' : 250,
+                    'width' : 300,
+                    'params' : {}
+                  };
+                </script>
+                <script src="https://www.highrevenueformat.com/7330eeefe6ee702d2cfca77bd8a7ce0f/invoke.js"></script>
             </div>
 
             <div class="modal-timer" id="withdrawTimer">10:00</div>
@@ -156,7 +154,6 @@
             </button>
         </div>
     </div>
-  
 
     <script src="/js/main.js"></script>
 </body>
