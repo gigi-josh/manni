@@ -21,9 +21,7 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
-pool.on('error', (err) => {
-    console.error('Unexpected DB error:', err);
-});
+pool.on('error', (err) => console.error('Unexpected DB error:', err));
 
 // ---------- Constants ----------
 const TRANSFER_WINDOW_START_DAY = 1;
@@ -48,9 +46,7 @@ function nextTransferWindowStart() {
 }
 
 function formatWindowDate(date) {
-    return date.toLocaleDateString('en-NG', {
-        month: 'long', day: 'numeric', year: 'numeric'
-    });
+    return date.toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
 function sanitizeUser(user) {
@@ -82,8 +78,7 @@ async function findUserByEmail(email) {
 
 async function getLastCompletionTime(userId) {
     const { rows } = await pool.query(
-        `SELECT MAX(completed_at) AS last FROM task_progress
-         WHERE user_id = $1 AND completed_at IS NOT NULL`,
+        `SELECT MAX(completed_at) AS last FROM task_completions WHERE user_id = $1`,
         [userId]
     );
     return rows[0].last ? new Date(rows[0].last).getTime() : 0;
@@ -99,27 +94,50 @@ async function getCooldownRemaining(userId) {
 async function getRecentCompletionCount(userId) {
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
     const { rows } = await pool.query(
-        `SELECT COUNT(*)::int AS count FROM task_progress
-         WHERE user_id = $1 AND completed_at > $2 AND status IN ('completed','pending')`,
+        `SELECT COUNT(*)::int AS count FROM task_completions
+         WHERE user_id = $1 AND completed_at > $2`,
         [userId, oneHourAgo]
     );
     return rows[0].count;
 }
 
-// Pick a random unused video for a user (or any video if all used)
 async function pickRandomVideoForUser(userId) {
-    // 1. Try to find an unused video
     const unused = await pool.query(
         `SELECT * FROM videos
-         WHERE id NOT IN (SELECT video_id FROM user_videos WHERE user_id = $1)
+         WHERE active = TRUE
+           AND id NOT IN (SELECT video_id FROM user_videos WHERE user_id = $1)
          ORDER BY RANDOM() LIMIT 1`,
         [userId]
     );
     if (unused.rows.length) return unused.rows[0];
 
-    // 2. All used — pick any at random
-    const any = await pool.query(`SELECT * FROM videos ORDER BY RANDOM() LIMIT 1`);
+    const any = await pool.query(
+        `SELECT * FROM videos WHERE active = TRUE ORDER BY RANDOM() LIMIT 1`
+    );
     return any.rows[0] || null;
+}
+
+// Determine the effective status of a task for a user (evaluates renewal rules)
+function computeEffectiveStatus(task, progress) {
+    if (!progress) return 'available';
+
+    const baseStatus = progress.status;
+
+    // Already renewable immediately (repeatable) — reset completed → available
+    if (task.repeatable && baseStatus === 'completed') {
+        return 'available';
+    }
+
+    // Renewable after N days
+    if (baseStatus === 'completed' && task.renew_after_days && task.renew_after_days > 0) {
+        const completedAt = progress.completed_at ? new Date(progress.completed_at).getTime() : 0;
+        const daysSince = (Date.now() - completedAt) / (1000 * 60 * 60 * 24);
+        if (daysSince >= task.renew_after_days) {
+            return 'available';
+        }
+    }
+
+    return baseStatus;
 }
 
 // ==================== DB INIT ====================
@@ -154,6 +172,8 @@ async function initDb() {
                 verification VARCHAR(20) NOT NULL,
                 min_seconds INTEGER DEFAULT 0,
                 active BOOLEAN DEFAULT TRUE,
+                repeatable BOOLEAN DEFAULT FALSE,
+                renew_after_days INTEGER,
                 created_at TIMESTAMP DEFAULT NOW()
             );
 
@@ -183,7 +203,17 @@ async function initDb() {
                 completed_at TIMESTAMP,
                 proof_url TEXT,
                 admin_note TEXT,
+                current_video_id INTEGER REFERENCES videos(id),
                 UNIQUE(user_id, task_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS task_completions (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+                reward INTEGER NOT NULL,
+                video_id INTEGER REFERENCES videos(id),
+                completed_at TIMESTAMP DEFAULT NOW()
             );
 
             CREATE TABLE IF NOT EXISTS withdrawals (
@@ -213,28 +243,82 @@ async function initDb() {
             );
 
             CREATE INDEX IF NOT EXISTS idx_task_progress_user ON task_progress(user_id);
-            CREATE INDEX IF NOT EXISTS idx_task_progress_completed ON task_progress(completed_at);
+            CREATE INDEX IF NOT EXISTS idx_task_completions_user ON task_completions(user_id);
+            CREATE INDEX IF NOT EXISTS idx_task_completions_time ON task_completions(completed_at);
             CREATE INDEX IF NOT EXISTS idx_withdrawals_user ON withdrawals(user_id);
             CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code);
             CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
             CREATE INDEX IF NOT EXISTS idx_user_videos_user ON user_videos(user_id);
         `);
 
-        // Seed default tasks if none exist
+        // Safe migrations
+        await pool.query(`
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='task_progress' AND column_name='current_video_id') THEN
+                    ALTER TABLE task_progress ADD COLUMN current_video_id INTEGER REFERENCES videos(id);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='repeatable') THEN
+                    ALTER TABLE tasks ADD COLUMN repeatable BOOLEAN DEFAULT FALSE;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='renew_after_days') THEN
+                    ALTER TABLE tasks ADD COLUMN renew_after_days INTEGER;
+                END IF;
+            END $$;
+        `);
+
+        // ---- Renewal rules by task type ----
+        // Video, Article, Social → repeatable immediately after cooldown
+        await pool.query(`
+            UPDATE tasks
+            SET repeatable = TRUE, renew_after_days = NULL
+            WHERE category IN ('Video', 'Article', 'Social')
+        `);
+
+        // Survey → renews after 3 days
+        await pool.query(`
+            UPDATE tasks
+            SET repeatable = FALSE, renew_after_days = 3
+            WHERE category = 'Survey'
+        `);
+
+        // Download → one-time only (never renews)
+        await pool.query(`
+            UPDATE tasks
+            SET repeatable = FALSE, renew_after_days = NULL
+            WHERE category = 'Download'
+        `);
+
+        // Reset any completed task_progress rows that qualify for renewal NOW
+        await pool.query(`
+            UPDATE task_progress tp
+            SET status = 'available', started_at = NULL, current_video_id = NULL
+            FROM tasks t
+            WHERE tp.task_id = t.id
+              AND tp.status = 'completed'
+              AND (
+                  t.repeatable = TRUE
+                  OR (t.renew_after_days IS NOT NULL
+                      AND tp.completed_at IS NOT NULL
+                      AND tp.completed_at < NOW() - (t.renew_after_days || ' days')::INTERVAL)
+              )
+        `);
+
+        // Seed default tasks
         const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM tasks');
         if (rows[0].count === 0) {
             await pool.query(`
-                INSERT INTO tasks (title, description, reward, category, link, instructions, verification, min_seconds) VALUES
-                ('Watch Video', 'Watch a short video and answer 2 quick questions', 50, 'Video', NULL, 'Watch the full video, then click "I''m Done"', 'video', 120),
-                ('Complete Survey', 'Share your opinion about fintech in Nigeria', 100, 'Survey', 'https://survey.example.com', 'Answer all questions, then submit a screenshot link', 'proof', 60),
-                ('Download App', 'Download and install a Nigerian shopping app', 150, 'Download', 'https://play.google.com/store/apps/details?id=example', 'Install, open the app, and submit a screenshot link', 'proof', 60),
-                ('Social Media Post', 'Post about MannieNG on Instagram or Twitter', 75, 'Social', NULL, 'Post using #MannieNG and tag @MannieNG, then submit the post URL', 'proof', 0),
-                ('Read Article', 'Read a short article and answer 3 quick questions', 109, 'Article', 'https://example.com/article', 'Read the article carefully, then click "I''m Done"', 'timed', 90)
+                INSERT INTO tasks (title, description, reward, category, link, instructions, verification, min_seconds, repeatable, renew_after_days) VALUES
+                ('Watch Video', 'Watch a short video and answer 2 quick questions', 50, 'Video', NULL, 'Watch the full video, then click "I''m Done"', 'video', 120, TRUE, NULL),
+                ('Complete Survey', 'Share your opinion about fintech in Nigeria', 100, 'Survey', 'https://survey.example.com', 'Answer all questions, then submit a screenshot link', 'proof', 60, FALSE, 3),
+                ('Download App', 'Download and install a Nigerian shopping app', 150, 'Download', 'https://play.google.com/store/apps/details?id=example', 'Install, open the app, and submit a screenshot link', 'proof', 60, FALSE, NULL),
+                ('Social Media Post', 'Post about MannieNG on Instagram or Twitter', 75, 'Social', NULL, 'Post using #MannieNG and tag @MannieNG, then submit the post URL', 'proof', 0, TRUE, NULL),
+                ('Read Article', 'Read a short article and answer 3 quick questions', 109, 'Article', 'https://example.com/article', 'Read the article carefully, then click "I''m Done"', 'timed', 90, TRUE, NULL)
             `);
             console.log('✅ Seeded default tasks');
         }
 
-        // Seed default videos if none exist
+        // Seed default videos
         const vid = await pool.query('SELECT COUNT(*)::int AS count FROM videos');
         if (vid.rows[0].count === 0) {
             await pool.query(`
@@ -310,12 +394,10 @@ app.post('/api/register', async (req, res) => {
         );
         const newUser = insert.rows[0];
 
-        // Initialize progress rows for all active tasks
         const allTasks = await client.query('SELECT id FROM tasks WHERE active = TRUE');
         for (const t of allTasks.rows) {
             await client.query(
-                `INSERT INTO task_progress (user_id, task_id, status)
-                 VALUES ($1, $2, 'available')
+                `INSERT INTO task_progress (user_id, task_id, status) VALUES ($1, $2, 'available')
                  ON CONFLICT (user_id, task_id) DO NOTHING`,
                 [newUser.id, t.id]
             );
@@ -333,7 +415,6 @@ app.post('/api/register', async (req, res) => {
         }
 
         await client.query('COMMIT');
-
         res.status(201).json({
             message: referralApplied ? `Welcome! You earned a ₦${signupBonus} signup bonus.` : 'Registration successful!',
             user: sanitizeUser(newUser),
@@ -343,9 +424,7 @@ app.post('/api/register', async (req, res) => {
         await client.query('ROLLBACK');
         console.error('Register error:', err);
         res.status(500).json({ error: 'Registration failed. Try again.' });
-    } finally {
-        client.release();
-    }
+    } finally { client.release(); }
 });
 
 app.post('/api/login', async (req, res) => {
@@ -358,10 +437,7 @@ app.post('/api/login', async (req, res) => {
         const valid = await bcrypt.compare(password, user.password);
         if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
         res.json({ message: 'Login successful!', user: sanitizeUser(user) });
-    } catch (err) {
-        console.error('Login error:', err);
-        res.status(500).json({ error: 'Login failed. Try again.' });
-    }
+    } catch { res.status(500).json({ error: 'Login failed. Try again.' }); }
 });
 
 // ==================== USER ====================
@@ -414,8 +490,29 @@ app.get('/api/tasks/:userId', async (req, res) => {
         const progressMap = {};
         progressRows.forEach(p => { progressMap[p.task_id] = p; });
 
+        const videoIds = progressRows.filter(p => p.current_video_id).map(p => p.current_video_id);
+        let videoMap = {};
+        if (videoIds.length) {
+            const { rows: vids } = await pool.query(
+                `SELECT id, url, title FROM videos WHERE id = ANY($1::int[])`, [videoIds]
+            );
+            vids.forEach(v => { videoMap[v.id] = v; });
+        }
+
         const tasksWithStatus = taskRows.map(task => {
             const p = progressMap[task.id];
+            const currentVideo = p && p.current_video_id ? videoMap[p.current_video_id] : null;
+            const effectiveStatus = computeEffectiveStatus(task, p);
+
+            // Compute "renews on" for completed renew-after-days tasks
+            let renewsOn = null;
+            if (p && p.status === 'completed' && task.renew_after_days && task.renew_after_days > 0 && p.completed_at) {
+                const renewDate = new Date(
+                    new Date(p.completed_at).getTime() + task.renew_after_days * 24 * 60 * 60 * 1000
+                );
+                renewsOn = renewDate.toISOString();
+            }
+
             return {
                 id: task.id,
                 title: task.title,
@@ -426,10 +523,16 @@ app.get('/api/tasks/:userId', async (req, res) => {
                 instructions: task.instructions,
                 verification: task.verification,
                 minSeconds: task.min_seconds,
-                status: p ? p.status : 'available',
+                repeatable: task.repeatable,
+                renewAfterDays: task.renew_after_days,
+                status: effectiveStatus,
                 startedAt: p ? p.started_at : null,
                 completedAt: p ? p.completed_at : null,
-                adminNote: p ? p.admin_note : null
+                renewsOn: renewsOn,
+                adminNote: p ? p.admin_note : null,
+                currentVideo: currentVideo
+                    ? { id: currentVideo.id, url: currentVideo.url, title: currentVideo.title }
+                    : null
             };
         });
 
@@ -464,10 +567,8 @@ app.post('/api/tasks/start', async (req, res) => {
         const task = taskRes.rows[0];
         if (!task) return res.status(404).json({ error: 'Task not found' });
 
-        // Get or create progress
         let { rows } = await pool.query(
-            'SELECT * FROM task_progress WHERE user_id = $1 AND task_id = $2',
-            [userId, taskId]
+            'SELECT * FROM task_progress WHERE user_id = $1 AND task_id = $2', [userId, taskId]
         );
         let progress = rows[0];
         if (!progress) {
@@ -478,17 +579,31 @@ app.post('/api/tasks/start', async (req, res) => {
             progress = ins.rows[0];
         }
 
-        if (progress.status === 'completed') return res.status(400).json({ error: 'Task already completed' });
-        if (progress.status === 'pending') return res.status(400).json({ error: 'Task awaiting admin approval' });
+        if (progress.status === 'pending') {
+            return res.status(400).json({ error: 'Task awaiting admin approval' });
+        }
+
+        // Evaluate renewal rules
+        const effectiveStatus = computeEffectiveStatus(task, progress);
+        if (effectiveStatus === 'completed') {
+            return res.status(400).json({ error: 'Task not yet renewable. Check back later.' });
+        }
+
         if (progress.status === 'started') {
+            let existingVideo = null;
+            if (progress.current_video_id) {
+                const vRes = await pool.query('SELECT id, url, title FROM videos WHERE id = $1', [progress.current_video_id]);
+                existingVideo = vRes.rows[0] || null;
+            }
             return res.json({
                 message: 'Task already started',
                 startedAt: progress.started_at,
-                minSeconds: task.min_seconds
+                minSeconds: task.min_seconds,
+                video: existingVideo
             });
         }
 
-        // ---- VIDEO TASK: pick a random unused video for this user ----
+        // Pick a video for video tasks
         let video = null;
         if (task.verification === 'video') {
             video = await pickRandomVideoForUser(userId);
@@ -498,9 +613,13 @@ app.post('/api/tasks/start', async (req, res) => {
         }
 
         const update = await pool.query(
-            `UPDATE task_progress SET status = 'started', started_at = NOW()
-             WHERE user_id = $1 AND task_id = $2 RETURNING *`,
-            [userId, taskId]
+            `UPDATE task_progress
+             SET status = 'started',
+                 started_at = NOW(),
+                 current_video_id = $1
+             WHERE user_id = $2 AND task_id = $3
+             RETURNING *`,
+            [video ? video.id : null, userId, taskId]
         );
 
         res.json({
@@ -530,24 +649,25 @@ app.post('/api/tasks/complete', async (req, res) => {
         if (!task) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Task not found' }); }
 
         const progressRes = await client.query(
-            'SELECT * FROM task_progress WHERE user_id = $1 AND task_id = $2',
-            [userId, taskId]
+            'SELECT * FROM task_progress WHERE user_id = $1 AND task_id = $2', [userId, taskId]
         );
         const progress = progressRes.rows[0];
         if (!progress) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Task not found for user' }); }
 
-        if (progress.status === 'completed') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Task already completed' }); }
-        if (progress.status === 'pending') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Task awaiting admin approval' }); }
-
-        const recentCount = await getRecentCompletionCount(userId);
-        if (recentCount >= RATE_LIMIT_PER_HOUR) {
+        if (progress.status === 'pending') {
             await client.query('ROLLBACK');
-            return res.status(429).json({ error: `Too many completions. Max ${RATE_LIMIT_PER_HOUR}/hour.` });
+            return res.status(400).json({ error: 'Task awaiting admin approval' });
         }
 
         if (progress.status !== 'started' || !progress.started_at) {
             await client.query('ROLLBACK');
             return res.status(400).json({ error: 'You must start this task first' });
+        }
+
+        const recentCount = await getRecentCompletionCount(userId);
+        if (recentCount >= RATE_LIMIT_PER_HOUR) {
+            await client.query('ROLLBACK');
+            return res.status(429).json({ error: `Too many completions. Max ${RATE_LIMIT_PER_HOUR}/hour.` });
         }
 
         if (task.min_seconds > 0) {
@@ -560,20 +680,42 @@ app.post('/api/tasks/complete', async (req, res) => {
             }
         }
 
-        // ---- VIDEO task: require videoId, mark as watched ----
+        // ---- Video resolution ----
+        let usedVideoId = null;
         if (task.verification === 'video') {
-            if (!videoId) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Video ID missing' }); }
+            let vid = null;
+            if (videoId) {
+                const check = await client.query('SELECT id FROM videos WHERE id = $1 AND active = TRUE', [videoId]);
+                if (check.rows.length) vid = check.rows[0].id;
+            }
+            if (!vid && progress.current_video_id) vid = progress.current_video_id;
+            if (!vid) {
+                const fallback = await client.query(
+                    `SELECT id FROM videos
+                     WHERE active = TRUE
+                       AND id NOT IN (SELECT video_id FROM user_videos WHERE user_id = $1)
+                     ORDER BY RANDOM() LIMIT 1`,
+                    [userId]
+                );
+                if (fallback.rows.length) vid = fallback.rows[0].id;
+            }
+            if (!vid) {
+                const any = await client.query(
+                    `SELECT id FROM videos WHERE active = TRUE ORDER BY RANDOM() LIMIT 1`
+                );
+                if (any.rows.length) vid = any.rows[0].id;
+            }
+            if (!vid) {
+                await client.query('ROLLBACK');
+                return res.status(503).json({ error: 'No videos available. Try again later.' });
+            }
+            usedVideoId = vid;
 
-            // Ensure the video exists
-            const vidRes = await client.query('SELECT id FROM videos WHERE id = $1 AND active = TRUE', [videoId]);
-            if (!vidRes.rows.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Invalid video' }); }
-
-            // Mark as watched (unique constraint means it can only be recorded once)
             await client.query(
                 `INSERT INTO user_videos (user_id, video_id, task_id)
                  VALUES ($1, $2, $3)
                  ON CONFLICT (user_id, video_id) DO NOTHING`,
-                [userId, videoId, taskId]
+                [userId, vid, taskId]
             );
         }
 
@@ -584,7 +726,8 @@ app.post('/api/tasks/complete', async (req, res) => {
                 return res.status(400).json({ error: 'Please provide proof to submit this task' });
             }
             await client.query(
-                `UPDATE task_progress SET status = 'pending', proof_url = $1, completed_at = NOW()
+                `UPDATE task_progress
+                 SET status = 'pending', proof_url = $1, completed_at = NOW(), current_video_id = NULL
                  WHERE user_id = $2 AND task_id = $3`,
                 [proofUrl.trim(), userId, taskId]
             );
@@ -592,28 +735,60 @@ app.post('/api/tasks/complete', async (req, res) => {
             await client.query('COMMIT');
             return res.json({
                 message: 'Submitted for review. Reward will be credited after approval.',
-                pending: true, reward: task.reward
+                pending: true,
+                reward: task.reward
             });
         }
 
         // ---- Timed / Video tasks → auto-approve ----
         await client.query(
-            `UPDATE task_progress SET status = 'completed', completed_at = NOW()
-             WHERE user_id = $1 AND task_id = $2`,
-            [userId, taskId]
+            `INSERT INTO task_completions (user_id, task_id, reward, video_id)
+             VALUES ($1, $2, $3, $4)`,
+            [userId, taskId, task.reward, usedVideoId]
         );
+
+        // Reset progress based on task rules
+        if (task.repeatable) {
+            // Video, Article, Social: immediately available again after cooldown
+            await client.query(
+                `UPDATE task_progress
+                 SET status = 'available', started_at = NULL, completed_at = NOW(), current_video_id = NULL
+                 WHERE user_id = $1 AND task_id = $2`,
+                [userId, taskId]
+            );
+        } else if (task.renew_after_days && task.renew_after_days > 0) {
+            // Survey: stays completed until N days pass
+            await client.query(
+                `UPDATE task_progress
+                 SET status = 'completed', completed_at = NOW(), current_video_id = NULL
+                 WHERE user_id = $1 AND task_id = $2`,
+                [userId, taskId]
+            );
+        } else {
+            // Download: one-time forever
+            await client.query(
+                `UPDATE task_progress
+                 SET status = 'completed', completed_at = NOW(), current_video_id = NULL
+                 WHERE user_id = $1 AND task_id = $2`,
+                [userId, taskId]
+            );
+        }
+
         const updated = await client.query(
             `UPDATE users SET balance = balance + $1, tasks_completed = tasks_completed + 1
              WHERE id = $2 RETURNING balance`,
             [task.reward, userId]
         );
+
         await client.query('COMMIT');
 
         res.json({
             message: 'Task completed!',
             reward: task.reward,
             newBalance: updated.rows[0].balance,
-            cooldownRemaining: TASK_COOLDOWN_SECONDS
+            cooldownRemaining: TASK_COOLDOWN_SECONDS,
+            repeatable: task.repeatable,
+            renewAfterDays: task.renew_after_days
         });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -847,10 +1022,29 @@ app.post('/api/admin/review', async (req, res) => {
         await client.query('UPDATE users SET pending_balance = GREATEST(0, pending_balance - $1) WHERE id = $2', [task.reward, userId]);
 
         if (approve) {
+            // Determine resulting status based on task rules
+            if (task.repeatable) {
+                await client.query(
+                    `UPDATE task_progress
+                     SET status = 'available', started_at = NULL, completed_at = NOW(), proof_url = NULL, admin_note = $1
+                     WHERE user_id = $2 AND task_id = $3`,
+                    [note || null, userId, taskId]
+                );
+            } else {
+                // Survey (renew_after_days) or Download (one-time) → stays 'completed'
+                await client.query(
+                    `UPDATE task_progress
+                     SET status = 'completed', admin_note = $1
+                     WHERE user_id = $2 AND task_id = $3`,
+                    [note || null, userId, taskId]
+                );
+            }
+
             await client.query(
-                `UPDATE task_progress SET status = 'completed', admin_note = $1 WHERE user_id = $2 AND task_id = $3`,
-                [note || null, userId, taskId]
+                `INSERT INTO task_completions (user_id, task_id, reward) VALUES ($1, $2, $3)`,
+                [userId, taskId, task.reward]
             );
+
             const u = await client.query(
                 `UPDATE users SET balance = balance + $1, tasks_completed = tasks_completed + 1 WHERE id = $2 RETURNING *`,
                 [task.reward, userId]
@@ -924,7 +1118,6 @@ app.get('/api/admin/transfers', async (req, res) => {
     } catch { res.status(500).json({ error: 'Failed to load transfers' }); }
 });
 
-// Admin: add videos
 app.post('/api/admin/videos', async (req, res) => {
     const { adminKey, url, title } = req.body;
     if (adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
