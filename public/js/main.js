@@ -559,11 +559,7 @@ async function completeTask(taskId) {
 
     if (task.verification === 'video') {
         const v = activeVideos[taskId];
-        if (!v || !v.id) {
-            alert('Video session lost. Please start the task again.');
-            return;
-        }
-        videoId = v.id;
+        videoId = v && v.id ? v.id : null;
     }
 
     if (task.verification === 'timed' || task.verification === 'video') {
@@ -815,3 +811,4 @@ document.addEventListener('DOMContentLoaded', () => {
         loadDashboard();
     }
 });
+
