@@ -320,7 +320,13 @@ function renderTaskCard(task) {
 
     switch (task.status) {
         case 'completed':
+        case 'completed':
+           if (task.renewsOn) {
+             const daysLeft = Math.ceil((new Date(task.renewsOn) - Date.now()) / (1000*60*60*24));
+             actionHtml = `<span class="task-completed">✅ Completed · Renews in ${daysLeft}d</span>`;
+           } else {
             actionHtml = `<span class="task-completed">✅ Completed</span>`;
+           }    
             break;
 
         case 'pending':
