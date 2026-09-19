@@ -31,6 +31,8 @@ const TASK_COOLDOWN_SECONDS = 120;
 const REFERRAL_BONUS_REFERRER = 600;
 const REFERRAL_BONUS_NEW_USER = 300;
 const RATE_LIMIT_PER_HOUR = 10;
+const STREAK_TARGET_DAYS = 30;
+const STREAK_BONUS_NGN = 7000;
 
 // ---------- Helpers ----------
 function isTransferWindowOpen() {
@@ -47,6 +49,13 @@ function nextTransferWindowStart() {
 
 function formatWindowDate(date) {
     return date.toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+// Nigeria time helpers (UTC+1)
+function nigeriaDateString(offsetDays = 0) {
+    const now = new Date();
+    const nigerianTime = new Date(now.getTime() + 60 * 60 * 1000 + offsetDays * 24 * 60 * 60 * 1000);
+    return nigerianTime.toISOString().slice(0, 10); // "YYYY-MM-DD"
 }
 
 function isEmail(str) {
@@ -75,6 +84,10 @@ function sanitizeUser(user) {
         referralCode: user.referral_code,
         referralEarnings: user.referral_earnings,
         referralCount: user.referral_count,
+        streakCount: user.streak_count || 0,
+        streakTarget: STREAK_TARGET_DAYS,
+        streakBonus: STREAK_BONUS_NGN,
+        lastTaskDate: user.last_task_date,
         createdAt: user.created_at
     };
 }
@@ -172,6 +185,8 @@ async function initDb() {
                 referral_code_used VARCHAR(20),
                 referral_earnings INTEGER DEFAULT 0,
                 referral_count INTEGER DEFAULT 0,
+                streak_count INTEGER DEFAULT 0,
+                last_task_date DATE,
                 created_at TIMESTAMP DEFAULT NOW()
             );
 
@@ -267,28 +282,19 @@ async function initDb() {
             CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
         `);
 
-        // Safe migrations for existing DBs
+        // Safe migrations
         await pool.query(`
             DO $$
             BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_name='users' AND column_name='email' AND is_nullable='NO'
-                ) THEN
+                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='email' AND is_nullable='NO') THEN
                     ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
                 END IF;
-
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='phone') THEN
                     ALTER TABLE users ADD COLUMN phone VARCHAR(20) UNIQUE;
                 END IF;
-
-                IF EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_name='users' AND column_name='phone' AND is_nullable='NO'
-                ) THEN
+                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='phone' AND is_nullable='NO') THEN
                     ALTER TABLE users ALTER COLUMN phone DROP NOT NULL;
                 END IF;
-
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='task_progress' AND column_name='current_video_id') THEN
                     ALTER TABLE task_progress ADD COLUMN current_video_id INTEGER REFERENCES videos(id);
                 END IF;
@@ -298,10 +304,16 @@ async function initDb() {
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='renew_after_days') THEN
                     ALTER TABLE tasks ADD COLUMN renew_after_days INTEGER;
                 END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='streak_count') THEN
+                    ALTER TABLE users ADD COLUMN streak_count INTEGER DEFAULT 0;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='last_task_date') THEN
+                    ALTER TABLE users ADD COLUMN last_task_date DATE;
+                END IF;
             END $$;
         `);
 
-        // Renewal rules per task
+        // Renewal rules
         await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Watch Video'`);
         await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Read Article'`);
         await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Social Media Post'`);
@@ -322,7 +334,7 @@ async function initDb() {
               )
         `);
 
-        // Seed default tasks
+        // Seed tasks
         const { rows } = await pool.query('SELECT COUNT(*)::int AS count FROM tasks');
         if (rows[0].count === 0) {
             await pool.query(`
@@ -336,7 +348,7 @@ async function initDb() {
             console.log('✅ Seeded default tasks');
         }
 
-        // Seed default videos
+        // Seed videos
         const vid = await pool.query('SELECT COUNT(*)::int AS count FROM videos');
         if (vid.rows[0].count === 0) {
             await pool.query(`
@@ -381,16 +393,11 @@ app.post('/api/register', async (req, res) => {
     if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
 
     const idTrim = identifier.trim();
-    let email = null;
-    let phone = null;
+    let email = null, phone = null;
 
-    if (isEmail(idTrim)) {
-        email = idTrim.toLowerCase();
-    } else if (isPhone(idTrim)) {
-        phone = normalizePhone(idTrim);
-    } else {
-        return res.status(400).json({ error: 'Enter a valid email address or Nigerian phone number' });
-    }
+    if (isEmail(idTrim)) email = idTrim.toLowerCase();
+    else if (isPhone(idTrim)) phone = normalizePhone(idTrim);
+    else return res.status(400).json({ error: 'Enter a valid email address or Nigerian phone number' });
 
     const client = await pool.connect();
     try {
@@ -749,6 +756,7 @@ app.post('/api/tasks/complete', async (req, res) => {
             );
         }
 
+        // ---- Proof tasks → pending (no streak credit yet) ----
         if (task.verification === 'proof' || task.verification === 'admin') {
             if (!proofUrl || typeof proofUrl !== 'string' || proofUrl.trim().length < 10) {
                 await client.query('ROLLBACK');
@@ -767,11 +775,45 @@ app.post('/api/tasks/complete', async (req, res) => {
             });
         }
 
+        // ---- Success path (timed/video tasks) ----
         await client.query(
             `INSERT INTO task_completions (user_id, task_id, reward, video_id) VALUES ($1, $2, $3, $4)`,
             [userId, taskId, task.reward, usedVideoId]
         );
 
+        // ---- Streak update ----
+        const today = nigeriaDateString(0);
+        const yesterday = nigeriaDateString(-1);
+        const lastDate = user.last_task_date
+            ? (user.last_task_date instanceof Date
+                ? user.last_task_date.toISOString().slice(0, 10)
+                : String(user.last_task_date).slice(0, 10))
+            : null;
+
+        let newStreak = user.streak_count || 0;
+        let streakBonusAwarded = 0;
+
+        if (lastDate === today) {
+            // Already did a task today — streak unchanged
+        } else if (lastDate === yesterday) {
+            newStreak = (user.streak_count || 0) + 1;
+        } else {
+            // Streak broken (or first ever task) → reset to 1
+            newStreak = 1;
+        }
+
+        if (newStreak >= STREAK_TARGET_DAYS) {
+            streakBonusAwarded = STREAK_BONUS_NGN;
+            newStreak = 0;
+            console.log(`🔥 STREAK BONUS: ₦${STREAK_BONUS_NGN} to ${user.username}`);
+        }
+
+        await client.query(
+            `UPDATE users SET streak_count = $1, last_task_date = $2 WHERE id = $3`,
+            [newStreak, today, userId]
+        );
+
+        // ---- Task progress reset ----
         if (task.repeatable) {
             await client.query(
                 `UPDATE task_progress SET status = 'available', started_at = NULL, completed_at = NOW(), current_video_id = NULL
@@ -786,18 +828,29 @@ app.post('/api/tasks/complete', async (req, res) => {
             );
         }
 
+        // ---- Credit reward + bonus ----
+        const totalCredit = task.reward + streakBonusAwarded;
         const updated = await client.query(
             `UPDATE users SET balance = balance + $1, tasks_completed = tasks_completed + 1 WHERE id = $2 RETURNING balance`,
-            [task.reward, userId]
+            [totalCredit, userId]
         );
 
         await client.query('COMMIT');
+
         res.json({
-            message: 'Task completed!',
+            message: streakBonusAwarded > 0
+                ? `🔥 STREAK COMPLETE! You earned ₦${task.reward} + ₦${streakBonusAwarded} streak bonus!`
+                : 'Task completed!',
             reward: task.reward,
+            streakBonus: streakBonusAwarded || null,
             newBalance: updated.rows[0].balance,
             cooldownRemaining: TASK_COOLDOWN_SECONDS,
-            repeatable: task.repeatable
+            repeatable: task.repeatable,
+            streak: {
+                count: newStreak,
+                target: STREAK_TARGET_DAYS,
+                bonusAwarded: streakBonusAwarded > 0
+            }
         });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -998,7 +1051,6 @@ app.post('/api/admin/verify', (req, res) => {
     res.json({ ok: true });
 });
 
-// Stats
 app.get('/api/admin/stats', requireAdmin, async (req, res) => {
     try {
         const [users, tasks, withdrawals, pending] = await Promise.all([
@@ -1033,7 +1085,7 @@ app.get('/api/admin/panel/users', requireAdmin, async (req, res) => {
 
 app.patch('/api/admin/panel/users/:id', requireAdmin, async (req, res) => {
     const { id } = req.params;
-    const { balance, pending_balance, tasks_completed, username } = req.body;
+    const { balance, pending_balance, tasks_completed, username, streak_count, last_task_date } = req.body;
 
     const fields = [];
     const values = [];
@@ -1043,6 +1095,8 @@ app.patch('/api/admin/panel/users/:id', requireAdmin, async (req, res) => {
     if (typeof pending_balance === 'number') { fields.push(`pending_balance = $${i++}`); values.push(pending_balance); }
     if (typeof tasks_completed === 'number') { fields.push(`tasks_completed = $${i++}`); values.push(tasks_completed); }
     if (typeof username === 'string' && username.length >= 3) { fields.push(`username = $${i++}`); values.push(username); }
+    if (typeof streak_count === 'number') { fields.push(`streak_count = $${i++}`); values.push(streak_count); }
+    if (last_task_date === null || typeof last_task_date === 'string') { fields.push(`last_task_date = $${i++}`); values.push(last_task_date); }
 
     if (!fields.length) return res.status(400).json({ error: 'No valid fields to update' });
 
@@ -1163,7 +1217,7 @@ app.get('/api/admin/panel/completions', requireAdmin, async (req, res) => {
     } catch { res.status(500).json({ error: 'Failed to load completions' }); }
 });
 
-// ==================== ADMIN (legacy — kept for compatibility) ====================
+// ==================== ADMIN (legacy) ====================
 
 app.get('/api/admin/pending', async (req, res) => {
     if (req.query.adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
@@ -1218,14 +1272,45 @@ app.post('/api/admin/review', async (req, res) => {
                 [userId, taskId, task.reward]
             );
 
-            const u = await client.query(
-                `UPDATE users SET balance = balance + $1, tasks_completed = tasks_completed + 1 WHERE id = $2 RETURNING *`,
-                [task.reward, userId]
+            // Update streak
+            const today = nigeriaDateString(0);
+            const yesterday = nigeriaDateString(-1);
+            const uRes = await client.query('SELECT * FROM users WHERE id = $1', [userId]);
+            const u = uRes.rows[0];
+            const lastDate = u.last_task_date
+                ? (u.last_task_date instanceof Date ? u.last_task_date.toISOString().slice(0,10) : String(u.last_task_date).slice(0,10))
+                : null;
+
+            let newStreak = u.streak_count || 0;
+            let streakBonusAwarded = 0;
+
+            if (lastDate === today) {}
+            else if (lastDate === yesterday) newStreak = (u.streak_count || 0) + 1;
+            else newStreak = 1;
+
+            if (newStreak >= STREAK_TARGET_DAYS) {
+                streakBonusAwarded = STREAK_BONUS_NGN;
+                newStreak = 0;
+                console.log(`🔥 STREAK BONUS (admin approve): ₦${STREAK_BONUS_NGN} to ${u.username}`);
+            }
+
+            const totalCredit = task.reward + streakBonusAwarded;
+            const updated = await client.query(
+                `UPDATE users SET balance = balance + $1,
+                                  tasks_completed = tasks_completed + 1,
+                                  streak_count = $2,
+                                  last_task_date = $3
+                 WHERE id = $4 RETURNING *`,
+                [totalCredit, newStreak, today, userId]
             );
+
             await client.query('COMMIT');
             return res.json({
                 message: 'Approved', userId, taskId, reward: task.reward,
-                newBalance: u.rows[0].balance, newPendingBalance: u.rows[0].pending_balance
+                streakBonus: streakBonusAwarded || null,
+                newBalance: updated.rows[0].balance,
+                newPendingBalance: updated.rows[0].pending_balance,
+                streak: { count: newStreak, target: STREAK_TARGET_DAYS }
             });
         } else {
             await client.query(
@@ -1253,12 +1338,9 @@ app.get('/api/admin/users', async (req, res) => {
 
 app.post('/api/admin/transfer', async (req, res) => {
     const { adminKey, adminPassword, transferId, status, note } = req.body;
-
-    // Accept either ADMIN_KEY (old) or DATABASE_PASSWORD (new admin panel)
     const okKey = adminKey === process.env.ADMIN_KEY;
     const okPw = adminPassword && adminPassword === process.env.DATABASE_PASSWORD;
     if (!okKey && !okPw) return res.status(403).json({ error: 'Forbidden' });
-
     if (!['processing', 'paid', 'failed'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
     const client = await pool.connect();
@@ -1336,6 +1418,7 @@ async function start() {
             console.log(`Min transfer: ₦${MIN_TRANSFER.toLocaleString()}`);
             console.log(`Cooldown: ${TASK_COOLDOWN_SECONDS}s`);
             console.log(`Referral: ₦${REFERRAL_BONUS_REFERRER} / ₦${REFERRAL_BONUS_NEW_USER}`);
+            console.log(`Streak: ${STREAK_TARGET_DAYS} days → ₦${STREAK_BONUS_NGN.toLocaleString()}`);
             console.log(`Window currently: ${isTransferWindowOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
             if (!process.env.DATABASE_PASSWORD) console.warn('⚠️  DATABASE_PASSWORD not set — /admin will not work');
         });
