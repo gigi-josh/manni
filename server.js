@@ -49,7 +49,6 @@ function formatWindowDate(date) {
     return date.toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-// Detect if identifier is an email or phone
 function isEmail(str) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str);
 }
@@ -58,9 +57,7 @@ function isPhone(str) {
     return /^(\+234|0)[789][01]\d{8}$/.test(str);
 }
 
-// Normalize phone to a canonical format for storage
 function normalizePhone(str) {
-    // Convert 0803... to +234803..., keep +234 as-is
     if (str.startsWith('0')) return '+234' + str.slice(1);
     return str;
 }
@@ -87,7 +84,6 @@ async function findUserById(id) {
     return rows[0] || null;
 }
 
-// Look up user by email OR phone
 async function findUserByIdentifier(identifier) {
     const trimmed = identifier.trim();
     const lower = trimmed.toLowerCase();
@@ -275,7 +271,6 @@ async function initDb() {
         await pool.query(`
             DO $$
             BEGIN
-                -- email was NOT NULL previously; make it nullable
                 IF EXISTS (
                     SELECT 1 FROM information_schema.columns
                     WHERE table_name='users' AND column_name='email' AND is_nullable='NO'
@@ -283,12 +278,10 @@ async function initDb() {
                     ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
                 END IF;
 
-                -- add phone column if missing (from older schema)
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='phone') THEN
                     ALTER TABLE users ADD COLUMN phone VARCHAR(20) UNIQUE;
                 END IF;
 
-                -- Drop old NOT NULL on phone if it was required with no unique
                 IF EXISTS (
                     SELECT 1 FROM information_schema.columns
                     WHERE table_name='users' AND column_name='phone' AND is_nullable='NO'
@@ -308,17 +301,13 @@ async function initDb() {
             END $$;
         `);
 
-        // Drop the old unique constraint on email if it blocks NULLs with UNIQUE
-        // (Postgres treats multiple NULLs as distinct, so this is fine by default)
-
-        // ---- Task renewal rules per task (by title) ----
+        // Renewal rules per task
         await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Watch Video'`);
         await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Read Article'`);
         await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Social Media Post'`);
         await pool.query(`UPDATE tasks SET repeatable = FALSE, renew_after_days = 3    WHERE title = 'Complete Survey'`);
         await pool.query(`UPDATE tasks SET repeatable = FALSE, renew_after_days = NULL WHERE title = 'Download App'`);
 
-        // Reset completed tasks back to 'available' if they qualify
         await pool.query(`
             UPDATE task_progress tp
             SET status = 'available', started_at = NULL, current_video_id = NULL
@@ -378,6 +367,7 @@ app.get('/surveys', (req, res) => res.sendFile(path.join(__dirname, 'public', 's
 app.get('/privacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privacy.html')));
 app.get('/terms', (req, res) => res.sendFile(path.join(__dirname, 'public', 'terms.html')));
 app.get('/transfer', (req, res) => res.sendFile(path.join(__dirname, 'public', 'transfer.html')));
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 
 // ==================== AUTH ====================
 
@@ -387,15 +377,10 @@ app.post('/api/register', async (req, res) => {
     if (!username || !identifier || !password) {
         return res.status(400).json({ error: 'Username, phone/email, and password are required' });
     }
-    if (username.length < 3) {
-        return res.status(400).json({ error: 'Username must be at least 3 characters' });
-    }
-    if (password.length < 6) {
-        return res.status(400).json({ error: 'Password must be at least 6 characters' });
-    }
+    if (username.length < 3) return res.status(400).json({ error: 'Username must be at least 3 characters' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
 
     const idTrim = identifier.trim();
-
     let email = null;
     let phone = null;
 
@@ -411,14 +396,12 @@ app.post('/api/register', async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // Check username uniqueness
         const userExists = await client.query('SELECT id FROM users WHERE username = $1', [username]);
         if (userExists.rows.length) {
             await client.query('ROLLBACK');
             return res.status(400).json({ error: 'Username already taken' });
         }
 
-        // Check email/phone uniqueness
         if (email) {
             const emExists = await client.query('SELECT id FROM users WHERE LOWER(email) = $1', [email]);
             if (emExists.rows.length) {
@@ -488,18 +471,13 @@ app.post('/api/register', async (req, res) => {
 
 app.post('/api/login', async (req, res) => {
     const { identifier, password } = req.body;
-
-    if (!identifier || !password) {
-        return res.status(400).json({ error: 'Phone/email and password required' });
-    }
+    if (!identifier || !password) return res.status(400).json({ error: 'Phone/email and password required' });
 
     try {
         const user = await findUserByIdentifier(identifier);
         if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-
         const valid = await bcrypt.compare(password, user.password);
         if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
-
         res.json({ message: 'Login successful!', user: sanitizeUser(user) });
     } catch (err) {
         console.error('Login error:', err);
@@ -1002,7 +980,190 @@ app.all('/api/cpx-webhook', async (req, res) => {
     } finally { client.release(); }
 });
 
-// ==================== ADMIN ====================
+// ==================== ADMIN AUTH ====================
+
+function requireAdmin(req, res, next) {
+    const pw = req.headers['x-admin-password'] || req.query.adminPassword || (req.body && req.body.adminPassword);
+    if (!process.env.DATABASE_PASSWORD || pw !== process.env.DATABASE_PASSWORD) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    next();
+}
+
+app.post('/api/admin/verify', (req, res) => {
+    const { password } = req.body;
+    if (!process.env.DATABASE_PASSWORD || password !== process.env.DATABASE_PASSWORD) {
+        return res.status(401).json({ error: 'Invalid password' });
+    }
+    res.json({ ok: true });
+});
+
+// Stats
+app.get('/api/admin/stats', requireAdmin, async (req, res) => {
+    try {
+        const [users, tasks, withdrawals, pending] = await Promise.all([
+            pool.query('SELECT COUNT(*)::int AS c FROM users'),
+            pool.query('SELECT COUNT(*)::int AS c FROM tasks WHERE active = TRUE'),
+            pool.query('SELECT COUNT(*)::int AS c FROM withdrawals'),
+            pool.query(`SELECT COUNT(*)::int AS c FROM task_progress WHERE status = 'pending'`)
+        ]);
+        const bal = await pool.query('SELECT COALESCE(SUM(balance),0)::int AS total FROM users');
+
+        res.json({
+            users: users.rows[0].c,
+            activeTasks: tasks.rows[0].c,
+            withdrawals: withdrawals.rows[0].c,
+            pendingReviews: pending.rows[0].c,
+            totalBalances: bal.rows[0].total
+        });
+    } catch (err) {
+        console.error('Stats error:', err);
+        res.status(500).json({ error: 'Failed to load stats' });
+    }
+});
+
+// ==================== ADMIN: USERS ====================
+
+app.get('/api/admin/panel/users', requireAdmin, async (req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT * FROM users ORDER BY id');
+        res.json(rows.map(sanitizeUser));
+    } catch { res.status(500).json({ error: 'Failed to load users' }); }
+});
+
+app.patch('/api/admin/panel/users/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { balance, pending_balance, tasks_completed, username } = req.body;
+
+    const fields = [];
+    const values = [];
+    let i = 1;
+
+    if (typeof balance === 'number') { fields.push(`balance = $${i++}`); values.push(balance); }
+    if (typeof pending_balance === 'number') { fields.push(`pending_balance = $${i++}`); values.push(pending_balance); }
+    if (typeof tasks_completed === 'number') { fields.push(`tasks_completed = $${i++}`); values.push(tasks_completed); }
+    if (typeof username === 'string' && username.length >= 3) { fields.push(`username = $${i++}`); values.push(username); }
+
+    if (!fields.length) return res.status(400).json({ error: 'No valid fields to update' });
+
+    values.push(id);
+    try {
+        const { rows } = await pool.query(
+            `UPDATE users SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`,
+            values
+        );
+        if (!rows.length) return res.status(404).json({ error: 'User not found' });
+        res.json(sanitizeUser(rows[0]));
+    } catch (err) {
+        console.error('Update user error:', err);
+        res.status(500).json({ error: 'Failed to update user' });
+    }
+});
+
+app.delete('/api/admin/panel/users/:id', requireAdmin, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
+        res.json({ ok: true });
+    } catch { res.status(500).json({ error: 'Failed to delete user' }); }
+});
+
+// ==================== ADMIN: TASKS ====================
+
+app.get('/api/admin/panel/tasks', requireAdmin, async (req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT * FROM tasks ORDER BY id');
+        res.json(rows);
+    } catch { res.status(500).json({ error: 'Failed to load tasks' }); }
+});
+
+app.patch('/api/admin/panel/tasks/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const allowed = ['title', 'description', 'reward', 'category', 'link', 'instructions', 'verification', 'min_seconds', 'active', 'repeatable', 'renew_after_days'];
+
+    const fields = [];
+    const values = [];
+    let i = 1;
+    for (const key of allowed) {
+        if (req.body[key] !== undefined) {
+            fields.push(`${key} = $${i++}`);
+            values.push(req.body[key]);
+        }
+    }
+    if (!fields.length) return res.status(400).json({ error: 'No valid fields' });
+
+    values.push(id);
+    try {
+        const { rows } = await pool.query(
+            `UPDATE tasks SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`,
+            values
+        );
+        if (!rows.length) return res.status(404).json({ error: 'Task not found' });
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('Update task error:', err);
+        res.status(500).json({ error: 'Failed to update task' });
+    }
+});
+
+// ==================== ADMIN: WITHDRAWALS ====================
+
+app.get('/api/admin/panel/withdrawals', requireAdmin, async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `SELECT w.*, u.username, u.email, u.phone
+             FROM withdrawals w
+             JOIN users u ON u.id = w.user_id
+             ORDER BY w.requested_at DESC`
+        );
+        res.json(rows);
+    } catch { res.status(500).json({ error: 'Failed to load withdrawals' }); }
+});
+
+// ==================== ADMIN: VIDEOS ====================
+
+app.get('/api/admin/panel/videos', requireAdmin, async (req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT * FROM videos ORDER BY id DESC');
+        res.json(rows);
+    } catch { res.status(500).json({ error: 'Failed to load videos' }); }
+});
+
+app.post('/api/admin/panel/videos', requireAdmin, async (req, res) => {
+    const { url, title } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL required' });
+    try {
+        const { rows } = await pool.query(
+            `INSERT INTO videos (url, title) VALUES ($1, $2) RETURNING *`,
+            [url, title || null]
+        );
+        res.json(rows[0]);
+    } catch { res.status(500).json({ error: 'Failed to add video' }); }
+});
+
+app.delete('/api/admin/panel/videos/:id', requireAdmin, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM videos WHERE id = $1', [req.params.id]);
+        res.json({ ok: true });
+    } catch { res.status(500).json({ error: 'Failed to delete video' }); }
+});
+
+// ==================== ADMIN: COMPLETIONS ====================
+
+app.get('/api/admin/panel/completions', requireAdmin, async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `SELECT tc.*, u.username, t.title AS task_title
+             FROM task_completions tc
+             JOIN users u ON u.id = tc.user_id
+             JOIN tasks t ON t.id = tc.task_id
+             ORDER BY tc.completed_at DESC
+             LIMIT 200`
+        );
+        res.json(rows);
+    } catch { res.status(500).json({ error: 'Failed to load completions' }); }
+});
+
+// ==================== ADMIN (legacy — kept for compatibility) ====================
 
 app.get('/api/admin/pending', async (req, res) => {
     if (req.query.adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
@@ -1091,8 +1252,13 @@ app.get('/api/admin/users', async (req, res) => {
 });
 
 app.post('/api/admin/transfer', async (req, res) => {
-    const { adminKey, transferId, status, note } = req.body;
-    if (adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
+    const { adminKey, adminPassword, transferId, status, note } = req.body;
+
+    // Accept either ADMIN_KEY (old) or DATABASE_PASSWORD (new admin panel)
+    const okKey = adminKey === process.env.ADMIN_KEY;
+    const okPw = adminPassword && adminPassword === process.env.DATABASE_PASSWORD;
+    if (!okKey && !okPw) return res.status(403).json({ error: 'Forbidden' });
+
     if (!['processing', 'paid', 'failed'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
     const client = await pool.connect();
@@ -1171,6 +1337,7 @@ async function start() {
             console.log(`Cooldown: ${TASK_COOLDOWN_SECONDS}s`);
             console.log(`Referral: ₦${REFERRAL_BONUS_REFERRER} / ₦${REFERRAL_BONUS_NEW_USER}`);
             console.log(`Window currently: ${isTransferWindowOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
+            if (!process.env.DATABASE_PASSWORD) console.warn('⚠️  DATABASE_PASSWORD not set — /admin will not work');
         });
     } catch (err) {
         console.error('❌ Failed to start:', err);
