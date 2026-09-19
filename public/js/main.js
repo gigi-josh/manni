@@ -49,11 +49,11 @@ const Popunder = {
 };
 
 // ================= STATE =================
-const activeTimers = {};       // per-task timers (startedAt → minSeconds)
+const activeTimers = {};
 let taskCache = [];
 let pendingWithdrawal = null;
 let withdrawAdInterval = null;
-let cooldownInterval = null;   // cooldown banner timer
+let cooldownInterval = null;
 
 // ================= REGISTER =================
 async function register(event) {
@@ -63,6 +63,10 @@ async function register(event) {
     const email = document.getElementById('email').value.trim();
     const phone = document.getElementById('phone').value.trim();
     const password = document.getElementById('password').value;
+
+    // Read referral code from URL (?ref=MNGABC123)
+    const urlParams = new URLSearchParams(window.location.search);
+    const ref = (urlParams.get('ref') || '').trim().toUpperCase() || null;
 
     if (username.length < 3) {
         return showMessage('registerMessage', 'Username must be at least 3 characters', 'error');
@@ -80,14 +84,17 @@ async function register(event) {
         const res = await fetch('/api/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, email, phone, password })
+            body: JSON.stringify({ username, email, phone, password, ref })
         });
         const data = await res.json();
 
         if (res.ok) {
             Auth.setUser(data.user);
-            showMessage('registerMessage', 'Registration successful! Redirecting...', 'success');
-            setTimeout(() => (window.location.href = '/dashboard'), 1200);
+            const msg = data.referralApplied
+                ? `🎉 Welcome! You earned ₦${data.user.balance} signup bonus! Redirecting...`
+                : 'Registration successful! Redirecting...';
+            showMessage('registerMessage', msg, 'success');
+            setTimeout(() => (window.location.href = '/dashboard'), 1500);
         } else {
             showMessage('registerMessage', data.error || 'Registration failed', 'error');
         }
@@ -153,9 +160,96 @@ async function loadDashboard() {
 
         loadTasks();
         loadWithdrawalHistory();
+        loadReferralWidget();
     } catch {
         Auth.logout();
     }
+}
+
+// ================= REFERRAL WIDGET =================
+async function loadReferralWidget() {
+    const container = document.getElementById('referralWidget');
+    if (!container) return;
+
+    const user = Auth.getUser();
+    if (!user) return;
+
+    try {
+        const res = await fetch(`/api/referrals/${user.id}`);
+        const data = await res.json();
+        if (!res.ok) return;
+
+        const shareMessage = encodeURIComponent(
+            `Join MannieNG! Get ₦${data.bonusNewUser} signup bonus instantly. Sign up: ${data.referralLink}`
+        );
+
+        container.innerHTML = `
+            <div class="referral-widget">
+                <h3>Invite Friends, Earn ₦${data.bonusReferrer} Each</h3>
+                <p class="referral-sub">Share your link. When they sign up, you get ₦${data.bonusReferrer} — they get ₦${data.bonusNewUser} instantly.</p>
+
+                <div class="referral-link-box">
+                    <input type="text" id="referralLinkInput" readonly value="${escapeAttr(data.referralLink)}">
+                    <button onclick="copyReferralLink()" class="btn btn-primary">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+
+                <div class="referral-stats">
+                    <div>
+                        <span class="ref-stat-label">Referrals</span>
+                        <span class="ref-stat-value">${data.referralCount}</span>
+                    </div>
+                    <div>
+                        <span class="ref-stat-label">Earned</span>
+                        <span class="ref-stat-value">₦${(data.referralEarnings || 0).toLocaleString()}</span>
+                    </div>
+                </div>
+
+                <div class="referral-share">
+                    <a href="https://wa.me/?text=${shareMessage}"
+                       target="_blank" rel="noopener" class="btn btn-outline">
+                        <i class="fab fa-whatsapp"></i> Share on WhatsApp
+                    </a>
+                    <a href="https://twitter.com/intent/tweet?text=${shareMessage}"
+                       target="_blank" rel="noopener" class="btn btn-outline">
+                        <i class="fab fa-twitter"></i> Tweet
+                    </a>
+                </div>
+
+                ${data.referrals.length ? `
+                    <h4 class="referral-list-title">Your Referrals</h4>
+                    <div class="referral-list">
+                        ${data.referrals.map(r => `
+                            <div class="referral-item">
+                                <span>${escapeHtml(r.username)}</span>
+                                <span class="referral-status status-paid">✅ Earned ₦${r.earned}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    } catch {
+        container.innerHTML = '';
+    }
+}
+
+function copyReferralLink() {
+    const input = document.getElementById('referralLinkInput');
+    if (!input) return;
+    input.select();
+    input.setSelectionRange(0, 99999);
+
+    try {
+        navigator.clipboard.writeText(input.value);
+
+        const btn = input.nextElementSibling;
+        if (!btn) return;
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+        setTimeout(() => (btn.innerHTML = original), 1500);
+    } catch {}
 }
 
 // ================= TASKS =================
@@ -163,7 +257,6 @@ async function loadTasks() {
     const user = Auth.getUser();
     if (!user) return;
 
-    // Clear per-task timers
     Object.values(activeTimers).forEach(id => clearInterval(id));
     Object.keys(activeTimers).forEach(k => delete activeTimers[k]);
 
@@ -176,14 +269,12 @@ async function loadTasks() {
             return;
         }
 
-        // ---- New response shape: { tasks, cooldownRemaining, cooldownTotal } ----
         const tasks = Array.isArray(data) ? data : (data.tasks || []);
         const cooldownRemaining = data.cooldownRemaining || 0;
         const cooldownTotal = data.cooldownTotal || 120;
 
         taskCache = tasks;
 
-        // Render cooldown banner above task list
         renderCooldownBanner(cooldownRemaining, cooldownTotal);
 
         const container = document.getElementById('tasksContainer');
@@ -296,7 +387,6 @@ function renderCooldownBanner(remaining, total) {
     banner.id = 'cooldownBanner';
     banner.className = 'cooldown-banner';
 
-    // Insert after the "Available Tasks" heading
     const heading = tasksSection.querySelector('h2');
     if (heading && heading.nextSibling) {
         tasksSection.insertBefore(banner, heading.nextSibling);
@@ -326,7 +416,7 @@ function renderCooldownBanner(remaining, total) {
             clearInterval(cooldownInterval);
             cooldownInterval = null;
             banner.remove();
-            loadTasks(); // refresh to unlock tasks
+            loadTasks();
         } else {
             render();
         }
@@ -338,7 +428,6 @@ async function startTask(taskId) {
     const user = Auth.getUser();
     if (!user) return;
 
-    // 🔥 Fire Adsterra Popunder on start action
     Popunder.fire();
 
     try {
@@ -352,7 +441,6 @@ async function startTask(taskId) {
         if (res.ok) {
             loadTasks();
         } else if (res.status === 429 && data.cooldownRemaining) {
-            // Server told us we're in cooldown
             renderCooldownBanner(data.cooldownRemaining, data.cooldownRemaining);
             loadTasks();
         } else {
@@ -442,7 +530,7 @@ async function completeTask(taskId) {
     }
 }
 
-// ================= WITHDRAW (Dashboard modal — if still used) =================
+// ================= WITHDRAW (Dashboard modal) =================
 async function withdraw(event) {
     event.preventDefault();
 
@@ -643,24 +731,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const path = window.location.pathname;
     const user = Auth.getUser();
 
-    // Redirect logged-in users away from public pages
     if (user && (path === '/' || path === '/login' || path === '/register')) {
         window.location.href = '/dashboard';
         return;
     }
 
-    // Wire auth forms (login/register pages only)
     const registerForm = document.getElementById('registerForm');
     if (registerForm) registerForm.addEventListener('submit', register);
 
     const loginForm = document.getElementById('loginForm');
     if (loginForm) loginForm.addEventListener('submit', login);
 
-    // Wire dashboard withdraw form (if still present)
     const withdrawForm = document.getElementById('withdrawForm');
     if (withdrawForm) withdrawForm.addEventListener('submit', withdraw);
 
-    // Load dashboard data on /dashboard
     if (path === '/dashboard') {
         loadDashboard();
     }
