@@ -741,6 +741,36 @@ textarea {
     font-weight: 700;
     margin-bottom: 12px;
 }
+.cooldown-banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: var(--primary-light);
+    border: 1px solid #FFD4B3;
+    border-radius: var(--radius-sm);
+    margin-bottom: 16px;
+    color: #8A4A00;
+}
+
+.cooldown-banner i {
+    font-size: 1.5rem;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.cooldown-banner strong {
+    display: block;
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 2px;
+}
+
+.cooldown-banner span {
+    font-size: 0.85rem;
+    opacity: 0.9;
+    font-variant-numeric: tabular-nums;
+}
 
 /* ================= TASK CARDS ================= */
 .tasks-grid {
