@@ -42,9 +42,7 @@ const Popunder = {
             s.async = true;
             s.referrerPolicy = 'no-referrer-when-downgrade';
             document.body.appendChild(s);
-        } catch (e) {
-            // silent fail
-        }
+        } catch (e) {}
     }
 };
 
@@ -97,7 +95,7 @@ async function register(event) {
         return showMessage('registerMessage', 'Password must be at least 6 characters', 'error');
     }
     if (!isValidEmail(identifier) && !isValidPhone(identifier)) {
-        return showMessage('registerMessage', 'Enter a valid email address or Nigerian phone number (e.g. 08012345678)', 'error');
+        return showMessage('registerMessage', 'Enter a valid email address or Nigerian phone number', 'error');
     }
 
     try {
@@ -175,12 +173,14 @@ async function loadDashboard() {
         const tasksEl = document.getElementById('tasksCompleted');
         const referralEl = document.getElementById('referralCode');
         const pendingEl = document.getElementById('pendingBalance');
+        const streakEl = document.getElementById('streakCount');
 
         if (usernameEl) usernameEl.textContent = user.username;
         if (balanceEl) balanceEl.textContent = `₦${(user.balance || 0).toLocaleString()}`;
         if (tasksEl) tasksEl.textContent = user.tasksCompleted || 0;
         if (referralEl) referralEl.textContent = user.referralCode || '-';
         if (pendingEl) pendingEl.textContent = `₦${(user.pendingBalance || 0).toLocaleString()}`;
+        if (streakEl) streakEl.textContent = user.streakCount || 0;
 
         loadTasks();
         loadWithdrawalHistory();
@@ -231,12 +231,10 @@ async function loadReferralWidget() {
                 </div>
 
                 <div class="referral-share">
-                    <a href="https://wa.me/?text=${shareMessage}"
-                       target="_blank" rel="noopener" class="btn btn-outline">
+                    <a href="https://wa.me/?text=${shareMessage}" target="_blank" rel="noopener" class="btn btn-outline">
                         <i class="fab fa-whatsapp"></i> Share on WhatsApp
                     </a>
-                    <a href="https://twitter.com/intent/tweet?text=${shareMessage}"
-                       target="_blank" rel="noopener" class="btn btn-outline">
+                    <a href="https://twitter.com/intent/tweet?text=${shareMessage}" target="_blank" rel="noopener" class="btn btn-outline">
                         <i class="fab fa-twitter"></i> Tweet
                     </a>
                 </div>
@@ -264,7 +262,6 @@ function copyReferralLink() {
     if (!input) return;
     input.select();
     input.setSelectionRange(0, 99999);
-
     try {
         navigator.clipboard.writeText(input.value);
         const btn = input.nextElementSibling;
@@ -297,7 +294,6 @@ async function loadTasks() {
         const cooldownTotal = data.cooldownTotal || 120;
 
         taskCache = tasks;
-
         renderCooldownBanner(cooldownRemaining, cooldownTotal);
 
         const container = document.getElementById('tasksContainer');
@@ -309,7 +305,6 @@ async function loadTasks() {
         }
 
         tasks.forEach(task => container.appendChild(renderTaskCard(task)));
-
         tasks.forEach(task => {
             if (task.status === 'started' && task.startedAt) {
                 startTimer(task.id, task.startedAt, task.minSeconds || 0, task.verification);
@@ -331,11 +326,7 @@ function renderTaskCard(task) {
             let completionText = '✅ Completed';
             if (task.renewsOn) {
                 const daysLeft = Math.max(0, Math.ceil((new Date(task.renewsOn) - Date.now()) / (1000 * 60 * 60 * 24)));
-                if (daysLeft > 0) {
-                    completionText = `✅ Completed · Renews in ${daysLeft}d`;
-                } else {
-                    completionText = '✅ Completed';
-                }
+                if (daysLeft > 0) completionText = `✅ Completed · Renews in ${daysLeft}d`;
             }
             actionHtml = `<span class="task-completed">${completionText}</span>`;
             break;
@@ -356,8 +347,7 @@ function renderTaskCard(task) {
             const activeVideo = activeVideos[task.id] || task.currentVideo;
             const videoHtml = (task.verification === 'video' && activeVideo)
                 ? `<div class="task-video">
-                       <iframe src="${escapeAttr(activeVideo.url)}"
-                               frameborder="0"
+                       <iframe src="${escapeAttr(activeVideo.url)}" frameborder="0"
                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                allowfullscreen></iframe>
                    </div>`
@@ -374,10 +364,7 @@ function renderTaskCard(task) {
                         <span class="timer-value" data-task-id="${task.id}">0s</span>
                     </div>
                 ` : ''}
-                <button id="completeBtn-${task.id}"
-                        onclick="completeTask(${task.id})"
-                        class="btn btn-success"
-                        ${disabledAttr}>
+                <button id="completeBtn-${task.id}" onclick="completeTask(${task.id})" class="btn btn-success" ${disabledAttr}>
                     I'm Done
                 </button>
             `;
@@ -396,9 +383,7 @@ function renderTaskCard(task) {
                 ? `<span class="badge badge-video">▶ Video · ${task.minSeconds}s min</span>`
                 : '';
 
-    const adLink = task.link
-        ? `/ad/${task.id}?url=${encodeURIComponent(task.link)}`
-        : '';
+    const adLink = task.link ? `/ad/${task.id}?url=${encodeURIComponent(task.link)}` : '';
 
     card.innerHTML = `
         <div class="task-header">
@@ -412,9 +397,7 @@ function renderTaskCard(task) {
         <p class="task-description">${escapeHtml(task.description)}</p>
         <small class="task-instructions">${escapeHtml(task.instructions)}</small>
         <div class="task-actions">
-            ${adLink
-                ? `<a href="${escapeAttr(adLink)}" target="_blank" rel="noopener" class="task-link">Open Task</a>`
-                : ''}
+            ${adLink ? `<a href="${escapeAttr(adLink)}" target="_blank" rel="noopener" class="task-link">Open Task</a>` : ''}
             ${actionHtml}
         </div>
     `;
@@ -422,7 +405,7 @@ function renderTaskCard(task) {
     return card;
 }
 
-// ================= COOLDOWN BANNER =================
+// ================= COOLDOWN =================
 function renderCooldownBanner(remaining, total) {
     const existing = document.getElementById('cooldownBanner');
     if (existing) existing.remove();
@@ -449,7 +432,6 @@ function renderCooldownBanner(remaining, total) {
     }
 
     let seconds = remaining;
-
     const render = () => {
         const m = Math.floor(seconds / 60);
         const s = seconds % 60;
@@ -509,22 +491,15 @@ async function startTask(taskId) {
     }
 }
 
-// ================= PER-TASK TIMER =================
+// ================= TIMER =================
 function startTimer(taskId, startedAt, minSeconds, verification) {
     const valueEl = document.querySelector(`.timer-value[data-task-id="${taskId}"]`);
     const timerBox = document.getElementById(`timer-${taskId}`);
     const completeBtn = document.getElementById(`completeBtn-${taskId}`);
-
-    if (!valueEl) {
-        console.warn(`[timer] No value element found for task ${taskId}`);
-        return;
-    }
+    if (!valueEl) return;
 
     const startMs = new Date(startedAt).getTime();
-    if (isNaN(startMs)) {
-        console.warn(`[timer] Invalid startedAt for task ${taskId}:`, startedAt);
-        return;
-    }
+    if (isNaN(startMs)) return;
 
     const isTimed = verification === 'timed' || verification === 'video';
 
@@ -535,9 +510,7 @@ function startTimer(taskId, startedAt, minSeconds, verification) {
         if (isTimed && elapsed >= minSeconds) {
             if (timerBox) timerBox.classList.add('timer-ready');
             valueEl.textContent = `✅ ${elapsed}s — ready`;
-            if (completeBtn && completeBtn.disabled) {
-                completeBtn.disabled = false;
-            }
+            if (completeBtn && completeBtn.disabled) completeBtn.disabled = false;
             clearInterval(activeTimers[taskId]);
             delete activeTimers[taskId];
         }
@@ -566,7 +539,6 @@ async function completeTask(taskId) {
             'Paste a link to your proof (screenshot URL, post URL, etc.):\n\n' +
             'Tip: upload your screenshot to imgur.com or drive.google.com and paste the link.'
         );
-
         if (!proofUrl || proofUrl.trim().length < 10) {
             alert('You must provide proof to submit this task.');
             return;
@@ -597,8 +569,11 @@ async function completeTask(taskId) {
 
             if (data.pending) {
                 alert(`⏳ Submitted for review.\n₦${data.reward} will be credited after approval.`);
+            } else if (data.streakBonus) {
+                alert(`🔥 STREAK BONUS! 🔥\n\nYou completed a ${data.streak.target}-day streak!\n\n+₦${data.reward} task reward\n+₦${data.streakBonus} streak bonus\n\nTotal: ₦${data.reward + data.streakBonus}`);
             } else {
-                alert(`✅ Task completed!\nYou earned ₦${data.reward}\n\nNext task unlocks in 2 minutes.`);
+                const streakMsg = data.streak ? `\n\n🔥 Streak: ${data.streak.count}/${data.streak.target} days` : '';
+                alert(`✅ Task completed!\nYou earned ₦${data.reward}${streakMsg}\n\nNext task unlocks in 2 minutes.`);
             }
             loadDashboard();
         } else {
@@ -609,10 +584,9 @@ async function completeTask(taskId) {
     }
 }
 
-// ================= WITHDRAW (Dashboard modal) =================
+// ================= WITHDRAW =================
 async function withdraw(event) {
     event.preventDefault();
-
     const user = Auth.getUser();
     if (!user) return;
 
@@ -620,15 +594,9 @@ async function withdraw(event) {
     const bankName = document.getElementById('bankName').value;
     const accountNumber = document.getElementById('accountNumber').value.trim();
 
-    if (!amount || amount < 2500) {
-        return showMessage('withdrawMessage', 'Minimum transfer is ₦2,500', 'error');
-    }
-    if (!bankName) {
-        return showMessage('withdrawMessage', 'Please select a bank', 'error');
-    }
-    if (!/^\d{10}$/.test(accountNumber)) {
-        return showMessage('withdrawMessage', 'Account number must be 10 digits', 'error');
-    }
+    if (!amount || amount < 2500) return showMessage('withdrawMessage', 'Minimum transfer is ₦2,500', 'error');
+    if (!bankName) return showMessage('withdrawMessage', 'Please select a bank', 'error');
+    if (!/^\d{10}$/.test(accountNumber)) return showMessage('withdrawMessage', 'Account number must be 10 digits', 'error');
 
     pendingWithdrawal = { userId: user.id, amount, bankName, accountNumber };
     openWithdrawAdModal();
@@ -656,21 +624,17 @@ function openWithdrawAdModal() {
     }).catch(() => {});
 
     let remaining = 600;
-
     const format = (s) => {
         const m = Math.floor(s / 60);
         const sec = s % 60;
         return `${m}:${String(sec).padStart(2, '0')}`;
     };
-
     timerEl.textContent = format(remaining);
 
     if (withdrawAdInterval) clearInterval(withdrawAdInterval);
-
     withdrawAdInterval = setInterval(() => {
         remaining--;
         timerEl.textContent = format(remaining);
-
         if (remaining <= 0) {
             clearInterval(withdrawAdInterval);
             withdrawAdInterval = null;
@@ -681,12 +645,8 @@ function openWithdrawAdModal() {
     }, 1000);
 
     confirmBtn.onclick = () => submitWithdrawal();
-
     cancelBtn.onclick = () => {
-        if (withdrawAdInterval) {
-            clearInterval(withdrawAdInterval);
-            withdrawAdInterval = null;
-        }
+        if (withdrawAdInterval) { clearInterval(withdrawAdInterval); withdrawAdInterval = null; }
         closeWithdrawAdModal();
         pendingWithdrawal = null;
     };
@@ -694,12 +654,8 @@ function openWithdrawAdModal() {
 
 async function submitWithdrawal() {
     if (!pendingWithdrawal) return;
-
     const confirmBtn = document.getElementById('confirmWithdrawBtn');
-    if (confirmBtn) {
-        confirmBtn.disabled = true;
-        confirmBtn.textContent = 'Processing…';
-    }
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = 'Processing…'; }
 
     try {
         const res = await fetch('/api/withdraw', {
@@ -708,15 +664,10 @@ async function submitWithdrawal() {
             body: JSON.stringify(pendingWithdrawal)
         });
         const data = await res.json();
-
         closeWithdrawAdModal();
 
         if (res.ok) {
-            showMessage(
-                'withdrawMessage',
-                `✅ ₦${data.amount.toLocaleString()} transfer to ${data.bankName} (${data.accountNumber}) submitted!`,
-                'success'
-            );
+            showMessage('withdrawMessage', `✅ ₦${data.amount.toLocaleString()} transfer to ${data.bankName} (${data.accountNumber}) submitted!`, 'success');
             const form = document.getElementById('withdrawForm');
             if (form) form.reset();
             loadDashboard();
@@ -727,10 +678,7 @@ async function submitWithdrawal() {
         closeWithdrawAdModal();
         showMessage('withdrawMessage', 'Network error. Try again.', 'error');
     } finally {
-        if (confirmBtn) {
-            confirmBtn.textContent = 'Confirm Withdrawal';
-            confirmBtn.disabled = true;
-        }
+        if (confirmBtn) { confirmBtn.textContent = 'Confirm Withdrawal'; confirmBtn.disabled = true; }
         pendingWithdrawal = null;
     }
 }
@@ -738,21 +686,15 @@ async function submitWithdrawal() {
 function closeWithdrawAdModal() {
     const modal = document.getElementById('withdrawAdModal');
     if (modal) modal.classList.remove('open');
-
     const timerEl = document.getElementById('withdrawTimer');
     if (timerEl) timerEl.classList.remove('timer-ready');
-
-    if (withdrawAdInterval) {
-        clearInterval(withdrawAdInterval);
-        withdrawAdInterval = null;
-    }
+    if (withdrawAdInterval) { clearInterval(withdrawAdInterval); withdrawAdInterval = null; }
 }
 
 // ================= WITHDRAWAL HISTORY =================
 async function loadWithdrawalHistory() {
     const container = document.getElementById('withdrawalHistory');
     if (!container) return;
-
     const user = Auth.getUser();
     if (!user) return;
 
