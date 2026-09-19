@@ -19,9 +19,10 @@ const withdrawStarts = {};
 const cpxTransactions = new Map();
 
 // ---------- Transfer window rule ----------
-// Transfers only allowed on days 1–5 of each month
 const TRANSFER_WINDOW_START_DAY = 1;
 const TRANSFER_WINDOW_END_DAY = 5;
+const MIN_TRANSFER = 2500;              // ₦2,500 minimum
+const TASK_COOLDOWN_SECONDS = 120;      // 2 minutes between task completions
 
 function isTransferWindowOpen() {
     const day = new Date().getDate();
@@ -33,10 +34,8 @@ function nextTransferWindowStart() {
     const day = now.getDate();
 
     if (day >= TRANSFER_WINDOW_START_DAY && day <= TRANSFER_WINDOW_END_DAY) {
-        return now; // window is open now
+        return now;
     }
-
-    // Next 1st of the month
     return new Date(now.getFullYear(), now.getMonth() + 1, TRANSFER_WINDOW_START_DAY);
 }
 
@@ -48,7 +47,7 @@ function formatWindowDate(date) {
     });
 }
 
-// ---------- Sample tasks with verification rules ----------
+// ---------- Sample tasks ----------
 const sampleTasks = [
     {
         id: 1,
@@ -104,6 +103,17 @@ const sampleTasks = [
         instructions: 'Post using #MannieNG and tag @MannieNG, then submit the post URL',
         verification: 'proof',
         minSeconds: 0
+    },
+    {
+        id: 6,
+        title: 'Read Article',
+        description: 'Read a short article and answer 3 quick questions',
+        reward: 109,
+        category: 'Article',
+        link: 'https://example.com/article',
+        instructions: 'Read the article carefully, then click "I\'m Done"',
+        verification: 'timed',
+        minSeconds: 90
     }
 ];
 
@@ -133,6 +143,21 @@ function recentCompletionCount(userId) {
     ).length;
 }
 
+// ---------- Cooldown helpers ----------
+function lastTaskCompletionTime(userId) {
+    const completions = taskProgress
+        .filter(tp => tp.userId === userId && tp.completedAt)
+        .map(tp => new Date(tp.completedAt).getTime());
+    return completions.length ? Math.max(...completions) : 0;
+}
+
+function cooldownRemaining(userId) {
+    const last = lastTaskCompletionTime(userId);
+    if (!last) return 0;
+    const elapsed = (Date.now() - last) / 1000;
+    return Math.max(0, Math.ceil(TASK_COOLDOWN_SECONDS - elapsed));
+}
+
 // ---------- Pages ----------
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'public', 'dashboard.html')));
@@ -141,6 +166,7 @@ app.get('/register', (req, res) => res.sendFile(path.join(__dirname, 'public', '
 app.get('/ad/:taskId', (req, res) => res.sendFile(path.join(__dirname, 'public', 'ad.html')));
 app.get('/surveys', (req, res) => res.sendFile(path.join(__dirname, 'public', 'surveys.html')));
 app.get('/privacy', (req, res) => res.sendFile(path.join(__dirname, 'public', 'privacy.html')));
+app.get('/terms', (req, res) => res.sendFile(path.join(__dirname, 'public', 'terms.html')));
 app.get('/transfer', (req, res) => res.sendFile(path.join(__dirname, 'public', 'transfer.html')));
 
 // ==================== AUTH ====================
@@ -252,7 +278,12 @@ app.get('/api/tasks/:userId', (req, res) => {
         };
     });
 
-    res.json(tasksWithStatus);
+    // NOTE: response shape changed — now returns { tasks, cooldownRemaining, cooldownTotal }
+    res.json({
+        tasks: tasksWithStatus,
+        cooldownRemaining: cooldownRemaining(userId),
+        cooldownTotal: TASK_COOLDOWN_SECONDS
+    });
 });
 
 app.post('/api/tasks/start', (req, res) => {
@@ -260,6 +291,15 @@ app.post('/api/tasks/start', (req, res) => {
 
     const user = findUser(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // ---- Cooldown check ----
+    const remaining = cooldownRemaining(userId);
+    if (remaining > 0) {
+        return res.status(429).json({
+            error: `Please wait ${remaining}s before starting another task.`,
+            cooldownRemaining: remaining
+        });
+    }
 
     const task = sampleTasks.find(t => t.id === taskId);
     if (!task) return res.status(404).json({ error: 'Task not found' });
@@ -357,13 +397,13 @@ app.post('/api/tasks/complete', (req, res) => {
     res.json({
         message: 'Task completed!',
         reward: task.reward,
-        newBalance: user.balance
+        newBalance: user.balance,
+        cooldownRemaining: TASK_COOLDOWN_SECONDS
     });
 });
 
 // ==================== TRANSFERS ====================
 
-// Public endpoint: check if transfer window is open
 app.get('/api/withdraw/window', (req, res) => {
     const open = isTransferWindowOpen();
     const next = nextTransferWindowStart();
@@ -373,15 +413,14 @@ app.get('/api/withdraw/window', (req, res) => {
         nextWindow: next.toISOString(),
         nextWindowLabel: formatWindowDate(next),
         windowStartDay: TRANSFER_WINDOW_START_DAY,
-        windowEndDay: TRANSFER_WINDOW_END_DAY
+        windowEndDay: TRANSFER_WINDOW_END_DAY,
+        minTransfer: MIN_TRANSFER
     });
 });
 
-// Starts the ad-watch timer (must be called before submitting a transfer)
 app.post('/api/withdraw/start', (req, res) => {
     const { userId } = req.body;
 
-    // Reject early if window is closed
     if (!isTransferWindowOpen()) {
         const next = nextTransferWindowStart();
         return res.status(403).json({
@@ -399,7 +438,6 @@ app.post('/api/withdraw/start', (req, res) => {
 app.post('/api/withdraw', (req, res) => {
     const { userId, amount, bankName, accountNumber } = req.body;
 
-    // ---- Rule: transfers only allowed days 1–5 ----
     if (!isTransferWindowOpen()) {
         const next = nextTransferWindowStart();
         return res.status(403).json({
@@ -410,7 +448,6 @@ app.post('/api/withdraw', (req, res) => {
     const user = findUser(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // ---- Enforce ad watch ----
     const startedAt = withdrawStarts[userId];
     if (!startedAt) {
         return res.status(400).json({ error: 'Transfer session not started' });
@@ -424,8 +461,8 @@ app.post('/api/withdraw', (req, res) => {
     delete withdrawStarts[userId];
 
     const amt = parseInt(amount);
-    if (!amt || amt < 100) {
-        return res.status(400).json({ error: 'Minimum transfer is ₦100' });
+    if (!amt || amt < MIN_TRANSFER) {
+        return res.status(400).json({ error: `Minimum transfer is ₦${MIN_TRANSFER.toLocaleString()}` });
     }
     if (user.balance < amt) {
         return res.status(400).json({ error: 'Insufficient balance' });
@@ -437,7 +474,6 @@ app.post('/api/withdraw', (req, res) => {
         return res.status(400).json({ error: 'Account number must be 10 digits' });
     }
 
-    // TODO: integrate Flutterwave / Paystack here
     user.balance -= amt;
 
     withdrawalRequests.push({
@@ -516,7 +552,6 @@ app.all('/api/cpx-webhook', (req, res) => {
         return res.status(400).json({ error: 'Missing trans_id or user_id' });
     }
 
-    // ---- Validate hash: md5(trans_id + "-" + SECURE_HASH) ----
     if (process.env.CPX_SECURE_HASH && hash) {
         const withDash = crypto.createHash('md5')
             .update(`${trans_id}-${process.env.CPX_SECURE_HASH}`)
@@ -539,7 +574,6 @@ app.all('/api/cpx-webhook', (req, res) => {
 
     const reward = Math.round(parseFloat(amount_local || '0') || 0);
 
-    // ---- Handle reversal (status = 2) ----
     if (String(status) === '2') {
         const existing = cpxTransactions.get(trans_id);
         if (existing && !existing.reversed) {
@@ -552,7 +586,6 @@ app.all('/api/cpx-webhook', (req, res) => {
         return res.json({ ok: true, reversed: true });
     }
 
-    // ---- Only credit on complete (status = 1) ----
     if (String(status) !== '1') {
         return res.json({ ok: true, message: 'Ignored non-complete status' });
     }
@@ -655,7 +688,6 @@ app.get('/api/admin/users', (req, res) => {
     res.json(users.map(sanitizeUser));
 });
 
-// Admin: manually process a pending transfer (mark as paid/failed)
 app.post('/api/admin/transfer', (req, res) => {
     const { adminKey, transferId, status, note } = req.body;
 
@@ -674,7 +706,6 @@ app.post('/api/admin/transfer', (req, res) => {
     transfer.processedAt = new Date().toISOString();
     transfer.adminNote = note || null;
 
-    // If failed, refund the user
     if (status === 'failed') {
         const user = findUser(transfer.userId);
         if (user) user.balance += transfer.amount;
@@ -683,7 +714,6 @@ app.post('/api/admin/transfer', (req, res) => {
     res.json({ ok: true, transfer });
 });
 
-// Admin: list all transfers
 app.get('/api/admin/transfers', (req, res) => {
     const { adminKey } = req.query;
     if (adminKey !== process.env.ADMIN_KEY) {
@@ -703,6 +733,8 @@ app.listen(PORT, () => {
     console.log(`MannieNG server running on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`Transfer window: day ${TRANSFER_WINDOW_START_DAY}–${TRANSFER_WINDOW_END_DAY} of each month`);
+    console.log(`Transfer minimum: ₦${MIN_TRANSFER.toLocaleString()}`);
+    console.log(`Task cooldown: ${TASK_COOLDOWN_SECONDS}s`);
     console.log(`Currently ${isTransferWindowOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
     if (!process.env.ADMIN_KEY) {
         console.warn('⚠️  ADMIN_KEY not set — admin endpoints will reject all requests');
