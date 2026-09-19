@@ -11,18 +11,20 @@ app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 app.use(express.static('public'));
 
-// ---------- In-memory storage (swap for MongoDB/Postgres in production) ----------
+// ---------- In-memory storage ----------
 const users = [];
 const taskProgress = [];
 const withdrawalRequests = [];
 const withdrawStarts = {};
 const cpxTransactions = new Map();
 
-// ---------- Transfer window rule ----------
+// ---------- Constants ----------
 const TRANSFER_WINDOW_START_DAY = 1;
 const TRANSFER_WINDOW_END_DAY = 5;
-const MIN_TRANSFER = 2500;              // ₦2,500 minimum
-const TASK_COOLDOWN_SECONDS = 120;      // 2 minutes between task completions
+const MIN_TRANSFER = 2500;
+const TASK_COOLDOWN_SECONDS = 120;
+const REFERRAL_BONUS_REFERRER = 600;   // User A gets this
+const REFERRAL_BONUS_NEW_USER = 300;   // User B gets this
 
 function isTransferWindowOpen() {
     const day = new Date().getDate();
@@ -32,10 +34,7 @@ function isTransferWindowOpen() {
 function nextTransferWindowStart() {
     const now = new Date();
     const day = now.getDate();
-
-    if (day >= TRANSFER_WINDOW_START_DAY && day <= TRANSFER_WINDOW_END_DAY) {
-        return now;
-    }
+    if (day >= TRANSFER_WINDOW_START_DAY && day <= TRANSFER_WINDOW_END_DAY) return now;
     return new Date(now.getFullYear(), now.getMonth() + 1, TRANSFER_WINDOW_START_DAY);
 }
 
@@ -47,7 +46,7 @@ function formatWindowDate(date) {
     });
 }
 
-// ---------- Sample tasks ----------
+// ---------- Sample tasks (no Referral task — now automatic) ----------
 const sampleTasks = [
     {
         id: 1,
@@ -84,17 +83,6 @@ const sampleTasks = [
     },
     {
         id: 4,
-        title: 'Refer a Friend',
-        description: 'Refer a friend to MannieNG and earn rewards',
-        reward: 200,
-        category: 'Referral',
-        link: '',
-        instructions: 'Share your referral code. Reward after friend completes 1 task.',
-        verification: 'admin',
-        minSeconds: 0
-    },
-    {
-        id: 5,
         title: 'Social Media Post',
         description: 'Post about MannieNG on Instagram or Twitter',
         reward: 75,
@@ -105,7 +93,7 @@ const sampleTasks = [
         minSeconds: 0
     },
     {
-        id: 6,
+        id: 5,
         title: 'Read Article',
         description: 'Read a short article and answer 3 quick questions',
         reward: 109,
@@ -143,7 +131,6 @@ function recentCompletionCount(userId) {
     ).length;
 }
 
-// ---------- Cooldown helpers ----------
 function lastTaskCompletionTime(userId) {
     const completions = taskProgress
         .filter(tp => tp.userId === userId && tp.completedAt)
@@ -172,7 +159,7 @@ app.get('/transfer', (req, res) => res.sendFile(path.join(__dirname, 'public', '
 // ==================== AUTH ====================
 
 app.post('/api/register', async (req, res) => {
-    const { username, email, password, phone } = req.body;
+    const { username, email, password, phone, ref } = req.body;
 
     if (!username || !email || !password || !phone) {
         return res.status(400).json({ error: 'All fields are required' });
@@ -198,7 +185,20 @@ app.post('/api/register', async (req, res) => {
         return res.status(400).json({ error: 'User with that email or username already exists' });
     }
 
+    // ---- Resolve referrer ----
+    let referrer = null;
+    let referralApplied = false;
+
+    if (ref && typeof ref === 'string') {
+        const code = ref.trim().toUpperCase();
+        referrer = users.find(u => u.referralCode === code);
+        if (referrer) referralApplied = true;
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    // ---- Signup bonus for new user if referred ----
+    const signupBonus = referralApplied ? REFERRAL_BONUS_NEW_USER : 0;
 
     const user = {
         id: users.length + 1,
@@ -206,15 +206,20 @@ app.post('/api/register', async (req, res) => {
         email,
         password: hashedPassword,
         phone,
-        balance: 0,
+        balance: signupBonus,
         pendingBalance: 0,
         tasksCompleted: 0,
         referralCode: `MNG${Date.now().toString(36).toUpperCase()}`,
+        referredBy: referrer ? referrer.id : null,
+        referralCodeUsed: referralApplied ? ref.trim().toUpperCase() : null,
+        referralEarnings: 0,
+        referralCount: 0,
         createdAt: new Date().toISOString()
     };
 
     users.push(user);
 
+    // Initialize progress for all tasks
     sampleTasks.forEach(task => {
         taskProgress.push({
             userId: user.id,
@@ -227,9 +232,22 @@ app.post('/api/register', async (req, res) => {
         });
     });
 
+    // ---- Pay referrer instantly ----
+    if (referrer) {
+        referrer.balance += REFERRAL_BONUS_REFERRER;
+        referrer.referralEarnings = (referrer.referralEarnings || 0) + REFERRAL_BONUS_REFERRER;
+        referrer.referralCount = (referrer.referralCount || 0) + 1;
+
+        console.log(`Referral paid: ₦${REFERRAL_BONUS_REFERRER} to ${referrer.username} (from new user ${user.username})`);
+        console.log(`Signup bonus: ₦${signupBonus} to ${user.username}`);
+    }
+
     res.status(201).json({
-        message: 'Registration successful!',
-        user: sanitizeUser(user)
+        message: referralApplied
+            ? `Welcome! You earned a ₦${signupBonus} signup bonus.`
+            : 'Registration successful!',
+        user: sanitizeUser(user),
+        referralApplied
     });
 });
 
@@ -260,6 +278,30 @@ app.get('/api/user/:id', (req, res) => {
     res.json(sanitizeUser(user));
 });
 
+// ==================== REFERRALS ====================
+
+app.get('/api/referrals/:userId', (req, res) => {
+    const userId = parseInt(req.params.userId);
+    const user = findUser(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const referred = users.filter(u => u.referredBy === userId);
+
+    res.json({
+        referralCode: user.referralCode,
+        referralLink: `https://manni.onrender.com/register?ref=${user.referralCode}`,
+        referralCount: referred.length,
+        referralEarnings: user.referralEarnings || 0,
+        bonusReferrer: REFERRAL_BONUS_REFERRER,
+        bonusNewUser: REFERRAL_BONUS_NEW_USER,
+        referrals: referred.map(u => ({
+            username: u.username,
+            joinedAt: u.createdAt,
+            earned: REFERRAL_BONUS_REFERRER
+        }))
+    });
+});
+
 // ==================== TASKS ====================
 
 app.get('/api/tasks/:userId', (req, res) => {
@@ -278,7 +320,6 @@ app.get('/api/tasks/:userId', (req, res) => {
         };
     });
 
-    // NOTE: response shape changed — now returns { tasks, cooldownRemaining, cooldownTotal }
     res.json({
         tasks: tasksWithStatus,
         cooldownRemaining: cooldownRemaining(userId),
@@ -292,7 +333,6 @@ app.post('/api/tasks/start', (req, res) => {
     const user = findUser(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
 
-    // ---- Cooldown check ----
     const remaining = cooldownRemaining(userId);
     if (remaining > 0) {
         return res.status(429).json({
@@ -540,10 +580,7 @@ app.all('/api/cpx-webhook', (req, res) => {
         trans_id,
         user_id,
         amount_local,
-        amount_usd,
-        hash,
-        ip_click,
-        type
+        hash
     } = params;
 
     console.log('CPX webhook received:', params);
@@ -735,6 +772,7 @@ app.listen(PORT, () => {
     console.log(`Transfer window: day ${TRANSFER_WINDOW_START_DAY}–${TRANSFER_WINDOW_END_DAY} of each month`);
     console.log(`Transfer minimum: ₦${MIN_TRANSFER.toLocaleString()}`);
     console.log(`Task cooldown: ${TASK_COOLDOWN_SECONDS}s`);
+    console.log(`Referral bonus: ₦${REFERRAL_BONUS_REFERRER} to referrer, ₦${REFERRAL_BONUS_NEW_USER} to new user`);
     console.log(`Currently ${isTransferWindowOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
     if (!process.env.ADMIN_KEY) {
         console.warn('⚠️  ADMIN_KEY not set — admin endpoints will reject all requests');
