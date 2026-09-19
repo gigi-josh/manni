@@ -55,11 +55,8 @@ let pendingWithdrawal = null;
 let withdrawAdInterval = null;
 let cooldownInterval = null;
 
-// Cache of active video for each started video task
-// Shape: { [taskId]: { id, url, title } }
 const activeVideos = {};
 
-// Persist active videos in sessionStorage so refresh keeps the same video
 function saveActiveVideos() {
     try {
         sessionStorage.setItem('mannieng_active_videos', JSON.stringify(activeVideos));
@@ -301,7 +298,15 @@ async function loadTasks() {
             return;
         }
 
+        // Step 1: Append all cards first
         tasks.forEach(task => container.appendChild(renderTaskCard(task)));
+
+        // Step 2: Start timers AFTER cards are in the DOM
+        tasks.forEach(task => {
+            if (task.status === 'started' && task.startedAt) {
+                startTimer(task.id, task.startedAt, task.minSeconds || 0, task.verification);
+            }
+        });
     } catch {
         document.getElementById('tasksContainer').innerHTML = '<p>Failed to load tasks.</p>';
     }
@@ -330,7 +335,6 @@ function renderTaskCard(task) {
             break;
 
         case 'started': {
-            // Video embed if this is a video task with a cached video
             const activeVideo = activeVideos[task.id];
             const videoHtml = (task.verification === 'video' && activeVideo)
                 ? `<div class="task-video">
@@ -396,10 +400,6 @@ function renderTaskCard(task) {
             ${actionHtml}
         </div>
     `;
-
-    if (task.status === 'started' && task.startedAt) {
-        startTimer(task.id, task.startedAt, task.minSeconds || 0, task.verification);
-    }
 
     return card;
 }
@@ -475,7 +475,6 @@ async function startTask(taskId) {
         const data = await res.json();
 
         if (res.ok) {
-            // Cache video for this started task
             if (data.video) {
                 activeVideos[taskId] = data.video;
                 saveActiveVideos();
@@ -497,12 +496,23 @@ function startTimer(taskId, startedAt, minSeconds, verification) {
     const valueEl = document.querySelector(`.timer-value[data-task-id="${taskId}"]`);
     const timerBox = document.getElementById(`timer-${taskId}`);
     const completeBtn = document.getElementById(`completeBtn-${taskId}`);
-    if (!valueEl) return;
+
+    if (!valueEl) {
+        console.warn(`[timer] No value element found for task ${taskId}`);
+        return;
+    }
+
+    // Parse the start time — supports both ISO string and Date object
+    const startMs = new Date(startedAt).getTime();
+    if (isNaN(startMs)) {
+        console.warn(`[timer] Invalid startedAt for task ${taskId}:`, startedAt);
+        return;
+    }
 
     const isTimed = verification === 'timed' || verification === 'video';
 
     const tick = () => {
-        const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+        const elapsed = Math.floor((Date.now() - startMs) / 1000);
         valueEl.textContent = `${elapsed}s`;
 
         if (isTimed && elapsed >= minSeconds) {
@@ -569,7 +579,6 @@ async function completeTask(taskId) {
         const data = await res.json();
 
         if (res.ok) {
-            // Clear cached video for this task
             delete activeVideos[taskId];
             saveActiveVideos();
 
