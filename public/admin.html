@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - MannieNG</title>
+    <meta name="robots" content="noindex, nofollow">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --primary: #FF6B00;
+            --secondary: #2D3748;
+            --accent: #718096;
+            --success: #38A169;
+            --danger: #E53E3E;
+            --warning: #D69E2E;
+            --bg: #F7FAFC;
+            --white: #FFFFFF;
+            --border: #E2E8F0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--secondary);
+            line-height: 1.5;
+            min-height: 100vh;
+        }
+
+        .navbar {
+            background: var(--secondary);
+            color: var(--white);
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 800;
+            font-size: 1.1rem;
+        }
+
+        .brand-badge {
+            background: var(--primary);
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+        }
+
+        .stats-bar {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            padding: 16px 24px;
+            background: var(--white);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stat-pill {
+            background: var(--bg);
+            padding: 10px 16px;
+            border-radius: 10px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border: 1px solid var(--border);
+        }
+
+        .stat-pill i {
+            color: var(--primary);
+        }
+
+        .tabs {
+            display: flex;
+            gap: 4px;
+            padding: 12px 24px 0;
+            background: var(--white);
+            border-bottom: 1px solid var(--border);
+            overflow-x: auto;
+            flex-wrap: nowrap;
+        }
+
+        .tab-btn {
+            padding: 10px 18px;
+            background: transparent;
+            border: none;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 0.88rem;
+            color: var(--accent);
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            color: var(--secondary);
+        }
+
+        .tab-btn.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .container {
+            padding: 20px 24px 60px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .panel {
+            display: none;
+        }
+
+        .panel.active {
+            display: block;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .panel-header h2 {
+            font-size: 1.15rem;
+            font-weight: 700;
+        }
+
+        .refresh-btn {
+            background: var(--white);
+            border: 1px solid var(--border);
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            color: var(--secondary);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .refresh-btn:hover {
+            background: var(--secondary);
+            color: var(--white);
+            border-color: var(--secondary);
+        }
+
+        .table-wrap {
+            background: var(--white);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        th {
+            background: var(--bg);
+            padding: 12px 14px;
+            text-align: left;
+            font-weight: 700;
+            color: var(--accent);
+            text-transform: uppercase;
+            font-size: 0.72rem;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: middle;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: #FAFBFC;
+        }
+
+        .editable {
+            background: transparent;
+            border: 1px solid transparent;
+            padding: 6px 8px;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 0.85rem;
+            color: inherit;
+            width: 100%;
+            min-width: 70px;
+        }
+
+        .editable:hover {
+            border-color: var(--border);
+            background: var(--bg);
+        }
+
+        .editable:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: var(--white);
+            box-shadow: 0 0 0 3px rgba(255,107,0,0.1);
+        }
+
+        .btn-sm {
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .btn-save {
+            background: var(--success);
+            color: var(--white);
+        }
+
+        .btn-save:hover {
+            background: #2F855A;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: var(--white);
+        }
+
+        .btn-danger:hover {
+            background: #C53030;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: var(--white);
+        }
+
+        .btn-primary:hover {
+            background: #E55A00;
+        }
+
+        .status-badge {
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: capitalize;
+            white-space: nowrap;
+        }
+
+        .status-processing { background: #FEFCBF; color: #744210; }
+        .status-paid { background: #F0FFF4; color: #22543D; }
+        .status-failed { background: #FFF5F5; color: #822727; }
+        .status-completed { background: #F0FFF4; color: #22543D; }
+        .status-pending { background: #FEFCBF; color: #744210; }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--accent);
+        }
+
+        .add-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .add-row input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.88rem;
+            min-width: 200px;
+        }
+
+        .add-row input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(255,107,0,0.1);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--secondary);
+            color: var(--white);
+            padding: 12px 20px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            font-weight: 600;
+            font-size: 0.88rem;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s;
+            z-index: 1000;
+            pointer-events: none;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .toast.error { background: var(--danger); }
+        .toast.success { background: var(--success); }
+
+        @media (max-width: 640px) {
+            .navbar { padding: 12px 16px; }
+            .stats-bar { padding: 12px 16px; }
+            .tabs { padding: 8px 12px 0; }
+            .tab-btn { padding: 8px 12px; font-size: 0.8rem; }
+            .container { padding: 14px 12px 40px; }
+            th, td { padding: 8px 10px; font-size: 0.78rem; }
+        }
+    </style>
+</head>
+<body>
+
+<nav class="navbar">
+    <div class="brand">
+        <div class="brand-badge">M</div>
+        <span>MannieNG · Admin Panel</span>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+        <span style="font-size:0.82rem; opacity:0.75;">DB: Connected</span>
+        <button class="refresh-btn" onclick="lockPanel()">
+            <i class="fas fa-lock"></i> Lock
+        </button>
+    </div>
+</nav>
+
+<div class="stats-bar" id="statsBar">
+    <div class="stat-pill"><i class="fas fa-users"></i> <span id="statUsers">…</span> Users</div>
+    <div class="stat-pill"><i class="fas fa-tasks"></i> <span id="statTasks">…</span> Tasks</div>
+    <div class="stat-pill"><i class="fas fa-money-bill-wave"></i> <span id="statWithdrawals">…</span> Withdrawals</div>
+    <div class="stat-pill"><i class="fas fa-clock"></i> <span id="statPending">…</span> Pending</div>
+    <div class="stat-pill"><i class="fas fa-wallet"></i> ₦<span id="statBalances">…</span> Held</div>
+</div>
+
+<div class="tabs">
+    <button class="tab-btn active" data-tab="users">Users</button>
+    <button class="tab-btn" data-tab="tasks">Tasks</button>
+    <button class="tab-btn" data-tab="withdrawals">Withdrawals</button>
+    <button class="tab-btn" data-tab="videos">Videos</button>
+    <button class="tab-btn" data-tab="completions">Completions</button>
+</div>
+
+<div class="container">
+
+    <!-- USERS -->
+    <div class="panel active" id="panel-users">
+        <div class="panel-header">
+            <h2>Users</h2>
+            <button class="refresh-btn" onclick="loadUsers()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+        <div class="table-wrap">
+            <table id="usersTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Balance ₦</th>
+                        <th>Pending ₦</th>
+                        <th>Tasks</th>
+                        <th>Referral</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody><tr><td colspan="9" class="loading">Loading…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- TASKS -->
+    <div class="panel" id="panel-tasks">
+        <div class="panel-header">
+            <h2>Tasks</h2>
+            <button class="refresh-btn" onclick="loadTasks()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+        <div class="table-wrap">
+            <table id="tasksTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Title</th>
+                        <th>Reward ₦</th>
+                        <th>Category</th>
+                        <th>Verify</th>
+                        <th>Min Sec</th>
+                        <th>Repeatable</th>
+                        <th>Renew Days</th>
+                        <th>Active</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody><tr><td colspan="10" class="loading">Loading…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- WITHDRAWALS -->
+    <div class="panel" id="panel-withdrawals">
+        <div class="panel-header">
+            <h2>Withdrawals</h2>
+            <button class="refresh-btn" onclick="loadWithdrawals()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+        <div class="table-wrap">
+            <table id="withdrawalsTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>User</th>
+                        <th>Amount ₦</th>
+                        <th>Bank</th>
+                        <th>Account</th>
+                        <th>Status</th>
+                        <th>Requested</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody><tr><td colspan="8" class="loading">Loading…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- VIDEOS -->
+    <div class="panel" id="panel-videos">
+        <div class="panel-header">
+            <h2>Videos</h2>
+            <button class="refresh-btn" onclick="loadVideos()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+        <div class="add-row">
+            <input type="text" id="newVideoUrl" placeholder="YouTube embed URL (https://www.youtube.com/embed/xxxxx)">
+            <input type="text" id="newVideoTitle" placeholder="Title (optional)" style="max-width:220px;">
+            <button class="btn-sm btn-primary" onclick="addVideo()">
+                <i class="fas fa-plus"></i> Add
+            </button>
+        </div>
+        <div class="table-wrap">
+            <table id="videosTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Title</th>
+                        <th>URL</th>
+                        <th>Active</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody><tr><td colspan="5" class="loading">Loading…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- COMPLETIONS -->
+    <div class="panel" id="panel-completions">
+        <div class="panel-header">
+            <h2>Recent Completions (last 200)</h2>
+            <button class="refresh-btn" onclick="loadCompletions()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+        <div class="table-wrap">
+            <table id="completionsTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>User</th>
+                        <th>Task</th>
+                        <th>Reward ₦</th>
+                        <th>When</th>
+                    </tr>
+                </thead>
+                <tbody><tr><td colspan="5" class="loading">Loading…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ===================== AUTH =====================
+let adminPassword = null;
+
+function lockPanel() {
+    sessionStorage.removeItem('admin_pw');
+    adminPassword = null;
+    location.reload();
+}
+
+async function authenticate() {
+    const stored = sessionStorage.getItem('admin_pw');
+    const pw = stored || prompt('Admin password:');
+
+    if (!pw) {
+        alert('Not an admin');
+        window.location.href = '/';
+        return false;
+    }
+
+    try {
+        const res = await fetch('/api/admin/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pw })
+        });
+
+        if (!res.ok) {
+            sessionStorage.removeItem('admin_pw');
+            alert('Not an admin');
+            window.location.href = '/';
+            return false;
+        }
+
+        sessionStorage.setItem('admin_pw', pw);
+        adminPassword = pw;
+        return true;
+    } catch {
+        alert('Could not reach server');
+        return false;
+    }
+}
+
+// ===================== API HELPER =====================
+async function api(path, options = {}) {
+    const res = await fetch(path, {
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminPassword,
+            ...(options.headers || {})
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined
+    });
+
+    if (res.status === 401) {
+        alert('Session expired. Please re-authenticate.');
+        sessionStorage.removeItem('admin_pw');
+        window.location.reload();
+        throw new Error('Unauthorized');
+    }
+
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Request failed');
+    }
+
+    return res.json();
+}
+
+// ===================== UI HELPERS =====================
+function toast(msg, type = '') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = `toast show ${type}`;
+    setTimeout(() => (el.className = 'toast'), 2500);
+}
+
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+function fmt(n) {
+    return (n || 0).toLocaleString();
+}
+
+function fmtDate(d) {
+    if (!d) return '-';
+    return new Date(d).toLocaleDateString('en-NG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// ===================== STATS =====================
+async function loadStats() {
+    try {
+        const s = await api('/api/admin/stats');
+        document.getElementById('statUsers').textContent = s.users;
+        document.getElementById('statTasks').textContent = s.activeTasks;
+        document.getElementById('statWithdrawals').textContent = s.withdrawals;
+        document.getElementById('statPending').textContent = s.pendingReviews;
+        document.getElementById('statBalances').textContent = fmt(s.totalBalances);
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+// ===================== USERS =====================
+async function loadUsers() {
+    const tbody = document.querySelector('#usersTable tbody');
+    tbody.innerHTML = '<tr><td colspan="9" class="loading">Loading…</td></tr>';
+    try {
+        const users = await api('/api/admin/panel/users');
+        if (!users.length) {
+            tbody.innerHTML = '<tr><td colspan="9" class="loading">No users yet.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = users.map(u => `
+            <tr data-id="${u.id}">
+                <td>${u.id}</td>
+                <td><input class="editable" value="${escapeHtml(u.username)}" data-field="username"></td>
+                <td>${escapeHtml(u.email || '—')}</td>
+                <td>${escapeHtml(u.phone || '—')}</td>
+                <td><input class="editable" type="number" value="${u.balance}" data-field="balance"></td>
+                <td><input class="editable" type="number" value="${u.pendingBalance}" data-field="pending_balance"></td>
+                <td><input class="editable" type="number" value="${u.tasksCompleted}" data-field="tasks_completed"></td>
+                <td title="${escapeHtml(u.referralCode)}">${u.referralCount || 0} refs · ₦${fmt(u.referralEarnings)}</td>
+                <td>
+                    <button class="btn-sm btn-save" onclick="saveUser(${u.id})">
+                        <i class="fas fa-check"></i> Save
+                    </button>
+                    <button class="btn-sm btn-danger" onclick="deleteUser(${u.id})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="9" class="loading">${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+async function saveUser(id) {
+    const row = document.querySelector(`tr[data-id="${id}"]`);
+    const body = {};
+    row.querySelectorAll('.editable').forEach(input => {
+        const field = input.dataset.field;
+        body[field] = input.type === 'number' ? parseInt(input.value, 10) : input.value;
+    });
+    try {
+        await api(`/api/admin/panel/users/${id}`, { method: 'PATCH', body });
+        toast('User saved', 'success');
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+async function deleteUser(id) {
+    if (!confirm(`Delete user #${id}? This also removes their tasks and history.`)) return;
+    try {
+        await api(`/api/admin/panel/users/${id}`, { method: 'DELETE' });
+        toast('User deleted', 'success');
+        loadUsers();
+        loadStats();
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+// ===================== TASKS =====================
+async function loadTasks() {
+    const tbody = document.querySelector('#tasksTable tbody');
+    tbody.innerHTML = '<tr><td colspan="10" class="loading">Loading…</td></tr>';
+    try {
+        const tasks = await api('/api/admin/panel/tasks');
+        if (!tasks.length) {
+            tbody.innerHTML = '<tr><td colspan="10" class="loading">No tasks.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = tasks.map(t => `
+            <tr data-id="${t.id}">
+                <td>${t.id}</td>
+                <td><input class="editable" value="${escapeHtml(t.title)}" data-field="title" style="min-width:140px"></td>
+                <td><input class="editable" type="number" value="${t.reward}" data-field="reward"></td>
+                <td><input class="editable" value="${escapeHtml(t.category)}" data-field="category" style="min-width:80px"></td>
+                <td>${escapeHtml(t.verification)}</td>
+                <td><input class="editable" type="number" value="${t.min_seconds}" data-field="min_seconds"></td>
+                <td><input type="checkbox" data-field="repeatable" ${t.repeatable ? 'checked' : ''}></td>
+                <td><input class="editable" type="number" value="${t.renew_after_days ?? ''}" data-field="renew_after_days" placeholder="—"></td>
+                <td><input type="checkbox" data-field="active" ${t.active ? 'checked' : ''}></td>
+                <td>
+                    <button class="btn-sm btn-save" onclick="saveTask(${t.id})">
+                        <i class="fas fa-check"></i> Save
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="10" class="loading">${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+async function saveTask(id) {
+    const row = document.querySelector(`#tasksTable tr[data-id="${id}"]`);
+    const body = {};
+    row.querySelectorAll('[data-field]').forEach(input => {
+        const f = input.dataset.field;
+        if (input.type === 'checkbox') body[f] = input.checked;
+        else if (input.type === 'number') body[f] = input.value === '' ? null : parseInt(input.value, 10);
+        else body[f] = input.value;
+    });
+    try {
+        await api(`/api/admin/panel/tasks/${id}`, { method: 'PATCH', body });
+        toast('Task saved', 'success');
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+// ===================== WITHDRAWALS =====================
+async function loadWithdrawals() {
+    const tbody = document.querySelector('#withdrawalsTable tbody');
+    tbody.innerHTML = '<tr><td colspan="8" class="loading">Loading…</td></tr>';
+    try {
+        const list = await api('/api/admin/panel/withdrawals');
+        if (!list.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="loading">No withdrawals.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = list.map(w => `
+            <tr>
+                <td>${w.id}</td>
+                <td>${escapeHtml(w.username)}</td>
+                <td><strong>₦${fmt(w.amount)}</strong></td>
+                <td>${escapeHtml(w.bank_name)}</td>
+                <td>${escapeHtml(w.account_number)}</td>
+                <td><span class="status-badge status-${w.status}">${w.status}</span></td>
+                <td>${fmtDate(w.requested_at)}</td>
+                <td>
+                    ${w.status !== 'paid' ? `<button class="btn-sm btn-save" onclick="updateTransfer(${w.id}, 'paid')"><i class="fas fa-check"></i> Paid</button>` : ''}
+                    ${w.status !== 'failed' ? `<button class="btn-sm btn-danger" onclick="updateTransfer(${w.id}, 'failed')"><i class="fas fa-times"></i> Fail</button>` : ''}
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" class="loading">${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+async function updateTransfer(id, status) {
+    if (!confirm(`Mark withdrawal #${id} as ${status}?`)) return;
+    try {
+        await api('/api/admin/transfer', {
+            method: 'POST',
+            body: { adminKey: adminPassword, transferId: id, status }
+        });
+        toast(`Withdrawal marked ${status}`, 'success');
+        loadWithdrawals();
+        loadStats();
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+// ===================== VIDEOS =====================
+async function loadVideos() {
+    const tbody = document.querySelector('#videosTable tbody');
+    tbody.innerHTML = '<tr><td colspan="5" class="loading">Loading…</td></tr>';
+    try {
+        const list = await api('/api/admin/panel/videos');
+        if (!list.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="loading">No videos yet.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = list.map(v => `
+            <tr>
+                <td>${v.id}</td>
+                <td>${escapeHtml(v.title || '—')}</td>
+                <td style="max-width:360px; word-break:break-all; font-size:0.78rem;">${escapeHtml(v.url)}</td>
+                <td>${v.active ? '✅' : '❌'}</td>
+                <td>
+                    <button class="btn-sm btn-danger" onclick="deleteVideo(${v.id})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" class="loading">${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+async function addVideo() {
+    const url = document.getElementById('newVideoUrl').value.trim();
+    const title = document.getElementById('newVideoTitle').value.trim();
+    if (!url) return toast('URL is required', 'error');
+    try {
+        await api('/api/admin/panel/videos', { method: 'POST', body: { url, title } });
+        document.getElementById('newVideoUrl').value = '';
+        document.getElementById('newVideoTitle').value = '';
+        toast('Video added', 'success');
+        loadVideos();
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+async function deleteVideo(id) {
+    if (!confirm(`Delete video #${id}?`)) return;
+    try {
+        await api(`/api/admin/panel/videos/${id}`, { method: 'DELETE' });
+        toast('Video deleted', 'success');
+        loadVideos();
+    } catch (err) {
+        toast(err.message, 'error');
+    }
+}
+
+// ===================== COMPLETIONS =====================
+async function loadCompletions() {
+    const tbody = document.querySelector('#completionsTable tbody');
+    tbody.innerHTML = '<tr><td colspan="5" class="loading">Loading…</td></tr>';
+    try {
+        const list = await api('/api/admin/panel/completions');
+        if (!list.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="loading">No completions yet.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = list.map(c => `
+            <tr>
+                <td>${c.id}</td>
+                <td>${escapeHtml(c.username)}</td>
+                <td>${escapeHtml(c.task_title)}</td>
+                <td>₦${fmt(c.reward)}</td>
+                <td>${fmtDate(c.completed_at)}</td>
+            </tr>
+        `).join('');
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" class="loading">${escapeHtml(err.message)}</td></tr>`;
+    }
+}
+
+// ===================== TABS =====================
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab;
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+        document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === `panel-${tab}`));
+
+        if (tab === 'users') loadUsers();
+        else if (tab === 'tasks') loadTasks();
+        else if (tab === 'withdrawals') loadWithdrawals();
+        else if (tab === 'videos') loadVideos();
+        else if (tab === 'completions') loadCompletions();
+    });
+});
+
+// ===================== INIT =====================
+(async () => {
+    const ok = await authenticate();
+    if (!ok) return;
+    loadStats();
+    loadUsers();
+})();
+</script>
+</body>
+</html>
