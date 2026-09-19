@@ -55,6 +55,24 @@ let pendingWithdrawal = null;
 let withdrawAdInterval = null;
 let cooldownInterval = null;
 
+// Cache of active video for each started video task
+// Shape: { [taskId]: { id, url, title } }
+const activeVideos = {};
+
+// Persist active videos in sessionStorage so refresh keeps the same video
+function saveActiveVideos() {
+    try {
+        sessionStorage.setItem('mannieng_active_videos', JSON.stringify(activeVideos));
+    } catch {}
+}
+
+function loadActiveVideos() {
+    try {
+        const raw = sessionStorage.getItem('mannieng_active_videos');
+        if (raw) Object.assign(activeVideos, JSON.parse(raw));
+    } catch {}
+}
+
 // ================= REGISTER =================
 async function register(event) {
     event.preventDefault();
@@ -64,7 +82,6 @@ async function register(event) {
     const phone = document.getElementById('phone').value.trim();
     const password = document.getElementById('password').value;
 
-    // Read referral code from URL (?ref=MNGABC123)
     const urlParams = new URLSearchParams(window.location.search);
     const ref = (urlParams.get('ref') || '').trim().toUpperCase() || null;
 
@@ -243,7 +260,6 @@ function copyReferralLink() {
 
     try {
         navigator.clipboard.writeText(input.value);
-
         const btn = input.nextElementSibling;
         if (!btn) return;
         const original = btn.innerHTML;
@@ -313,20 +329,38 @@ function renderTaskCard(task) {
             `;
             break;
 
-        case 'started':
+        case 'started': {
+            // Video embed if this is a video task with a cached video
+            const activeVideo = activeVideos[task.id];
+            const videoHtml = (task.verification === 'video' && activeVideo)
+                ? `<div class="task-video">
+                       <iframe src="${escapeAttr(activeVideo.url)}"
+                               frameborder="0"
+                               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                               allowfullscreen></iframe>
+                   </div>`
+                : '';
+
+            const isTimed = task.verification === 'timed' || task.verification === 'video';
+            const disabledAttr = isTimed ? 'disabled' : '';
+
             actionHtml = `
-                <div class="task-timer" id="timer-${task.id}">
-                    <span class="timer-label">Time on task:</span>
-                    <span class="timer-value" data-task-id="${task.id}">0s</span>
-                </div>
+                ${videoHtml}
+                ${isTimed ? `
+                    <div class="task-timer" id="timer-${task.id}">
+                        <span class="timer-label">Time on task:</span>
+                        <span class="timer-value" data-task-id="${task.id}">0s</span>
+                    </div>
+                ` : ''}
                 <button id="completeBtn-${task.id}"
                         onclick="completeTask(${task.id})"
                         class="btn btn-success"
-                        ${task.verification === 'timed' ? 'disabled' : ''}>
+                        ${disabledAttr}>
                     I'm Done
                 </button>
             `;
             break;
+        }
 
         default:
             actionHtml = `<button onclick="startTask(${task.id})" class="btn btn-primary">Start Task</button>`;
@@ -336,7 +370,9 @@ function renderTaskCard(task) {
         ? `<span class="badge badge-proof">Proof required</span>`
         : task.verification === 'timed'
             ? `<span class="badge badge-timed">⏱ ${task.minSeconds}s min</span>`
-            : '';
+            : task.verification === 'video'
+                ? `<span class="badge badge-video">▶ Video · ${task.minSeconds}s min</span>`
+                : '';
 
     const adLink = task.link
         ? `/ad/${task.id}?url=${encodeURIComponent(task.link)}`
@@ -439,6 +475,11 @@ async function startTask(taskId) {
         const data = await res.json();
 
         if (res.ok) {
+            // Cache video for this started task
+            if (data.video) {
+                activeVideos[taskId] = data.video;
+                saveActiveVideos();
+            }
             loadTasks();
         } else if (res.status === 429 && data.cooldownRemaining) {
             renderCooldownBanner(data.cooldownRemaining, data.cooldownRemaining);
@@ -458,11 +499,13 @@ function startTimer(taskId, startedAt, minSeconds, verification) {
     const completeBtn = document.getElementById(`completeBtn-${taskId}`);
     if (!valueEl) return;
 
+    const isTimed = verification === 'timed' || verification === 'video';
+
     const tick = () => {
         const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
         valueEl.textContent = `${elapsed}s`;
 
-        if (verification === 'timed' && elapsed >= minSeconds) {
+        if (isTimed && elapsed >= minSeconds) {
             if (timerBox) timerBox.classList.add('timer-ready');
             valueEl.textContent = `✅ ${elapsed}s — ready`;
             if (completeBtn && completeBtn.disabled) {
@@ -489,6 +532,7 @@ async function completeTask(taskId) {
     }
 
     let proofUrl = null;
+    let videoId = null;
 
     if (task.verification === 'proof' || task.verification === 'admin') {
         proofUrl = prompt(
@@ -503,7 +547,16 @@ async function completeTask(taskId) {
         proofUrl = proofUrl.trim();
     }
 
-    if (task.verification === 'timed') {
+    if (task.verification === 'video') {
+        const v = activeVideos[taskId];
+        if (!v || !v.id) {
+            alert('Video session lost. Please start the task again.');
+            return;
+        }
+        videoId = v.id;
+    }
+
+    if (task.verification === 'timed' || task.verification === 'video') {
         if (!confirm('Confirm you have completed this task?')) return;
     }
 
@@ -511,11 +564,15 @@ async function completeTask(taskId) {
         const res = await fetch('/api/tasks/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: user.id, taskId, proofUrl })
+            body: JSON.stringify({ userId: user.id, taskId, proofUrl, videoId })
         });
         const data = await res.json();
 
         if (res.ok) {
+            // Clear cached video for this task
+            delete activeVideos[taskId];
+            saveActiveVideos();
+
             if (data.pending) {
                 alert(`⏳ Submitted for review.\n₦${data.reward} will be credited after approval.`);
             } else {
@@ -557,9 +614,7 @@ async function withdraw(event) {
 
 function openWithdrawAdModal() {
     const modal = document.getElementById('withdrawAdModal');
-    if (!modal) {
-        return submitWithdrawal();
-    }
+    if (!modal) return submitWithdrawal();
 
     Popunder.fire();
 
@@ -730,6 +785,8 @@ function escapeAttr(str) {
 document.addEventListener('DOMContentLoaded', () => {
     const path = window.location.pathname;
     const user = Auth.getUser();
+
+    loadActiveVideos();
 
     if (user && (path === '/' || path === '/login' || path === '/register')) {
         window.location.href = '/dashboard';
