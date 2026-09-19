@@ -49,6 +49,22 @@ function formatWindowDate(date) {
     return date.toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
+// Detect if identifier is an email or phone
+function isEmail(str) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str);
+}
+
+function isPhone(str) {
+    return /^(\+234|0)[789][01]\d{8}$/.test(str);
+}
+
+// Normalize phone to a canonical format for storage
+function normalizePhone(str) {
+    // Convert 0803... to +234803..., keep +234 as-is
+    if (str.startsWith('0')) return '+234' + str.slice(1);
+    return str;
+}
+
 function sanitizeUser(user) {
     if (!user) return null;
     return {
@@ -71,8 +87,14 @@ async function findUserById(id) {
     return rows[0] || null;
 }
 
-async function findUserByEmail(email) {
-    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+// Look up user by email OR phone
+async function findUserByIdentifier(identifier) {
+    const trimmed = identifier.trim();
+    const lower = trimmed.toLowerCase();
+    const { rows } = await pool.query(
+        `SELECT * FROM users WHERE LOWER(email) = $1 OR phone = $2 LIMIT 1`,
+        [lower, trimmed]
+    );
     return rows[0] || null;
 }
 
@@ -117,18 +139,14 @@ async function pickRandomVideoForUser(userId) {
     return any.rows[0] || null;
 }
 
-// Determine the effective status of a task for a user (evaluates renewal rules)
 function computeEffectiveStatus(task, progress) {
     if (!progress) return 'available';
-
     const baseStatus = progress.status;
 
-    // Already renewable immediately (repeatable) — reset completed → available
     if (task.repeatable && baseStatus === 'completed') {
         return 'available';
     }
 
-    // Renewable after N days
     if (baseStatus === 'completed' && task.renew_after_days && task.renew_after_days > 0) {
         const completedAt = progress.completed_at ? new Date(progress.completed_at).getTime() : 0;
         const daysSince = (Date.now() - completedAt) / (1000 * 60 * 60 * 24);
@@ -147,9 +165,9 @@ async function initDb() {
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(50) UNIQUE NOT NULL,
-                email VARCHAR(255) UNIQUE NOT NULL,
+                email VARCHAR(255) UNIQUE,
+                phone VARCHAR(20) UNIQUE,
                 password VARCHAR(255) NOT NULL,
-                phone VARCHAR(20) NOT NULL,
                 balance INTEGER DEFAULT 0,
                 pending_balance INTEGER DEFAULT 0,
                 tasks_completed INTEGER DEFAULT 0,
@@ -249,12 +267,35 @@ async function initDb() {
             CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code);
             CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
             CREATE INDEX IF NOT EXISTS idx_user_videos_user ON user_videos(user_id);
+            CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users(LOWER(email));
+            CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
         `);
 
-        // Safe migrations
+        // Safe migrations for existing DBs
         await pool.query(`
             DO $$
             BEGIN
+                -- email was NOT NULL previously; make it nullable
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='users' AND column_name='email' AND is_nullable='NO'
+                ) THEN
+                    ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+                END IF;
+
+                -- add phone column if missing (from older schema)
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='phone') THEN
+                    ALTER TABLE users ADD COLUMN phone VARCHAR(20) UNIQUE;
+                END IF;
+
+                -- Drop old NOT NULL on phone if it was required with no unique
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='users' AND column_name='phone' AND is_nullable='NO'
+                ) THEN
+                    ALTER TABLE users ALTER COLUMN phone DROP NOT NULL;
+                END IF;
+
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='task_progress' AND column_name='current_video_id') THEN
                     ALTER TABLE task_progress ADD COLUMN current_video_id INTEGER REFERENCES videos(id);
                 END IF;
@@ -267,29 +308,17 @@ async function initDb() {
             END $$;
         `);
 
-        // ---- Renewal rules by task type ----
-        // Video, Article, Social → repeatable immediately after cooldown
-        await pool.query(`
-            UPDATE tasks
-            SET repeatable = TRUE, renew_after_days = NULL
-            WHERE category IN ('Video', 'Article', 'Social')
-        `);
+        // Drop the old unique constraint on email if it blocks NULLs with UNIQUE
+        // (Postgres treats multiple NULLs as distinct, so this is fine by default)
 
-        // Survey → renews after 3 days
-        await pool.query(`
-            UPDATE tasks
-            SET repeatable = FALSE, renew_after_days = 3
-            WHERE category = 'Survey'
-        `);
+        // ---- Task renewal rules per task (by title) ----
+        await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Watch Video'`);
+        await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Read Article'`);
+        await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Social Media Post'`);
+        await pool.query(`UPDATE tasks SET repeatable = FALSE, renew_after_days = 3    WHERE title = 'Complete Survey'`);
+        await pool.query(`UPDATE tasks SET repeatable = FALSE, renew_after_days = NULL WHERE title = 'Download App'`);
 
-        // Download → one-time only (never renews)
-        await pool.query(`
-            UPDATE tasks
-            SET repeatable = FALSE, renew_after_days = NULL
-            WHERE category = 'Download'
-        `);
-
-        // Reset any completed task_progress rows that qualify for renewal NOW
+        // Reset completed tasks back to 'available' if they qualify
         await pool.query(`
             UPDATE task_progress tp
             SET status = 'available', started_at = NULL, current_video_id = NULL
@@ -353,26 +382,56 @@ app.get('/transfer', (req, res) => res.sendFile(path.join(__dirname, 'public', '
 // ==================== AUTH ====================
 
 app.post('/api/register', async (req, res) => {
-    const { username, email, password, phone, ref } = req.body;
+    const { username, identifier, password, ref } = req.body;
 
-    if (!username || !email || !password || !phone) return res.status(400).json({ error: 'All fields are required' });
-    if (username.length < 3) return res.status(400).json({ error: 'Username must be at least 3 characters' });
-    if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!username || !identifier || !password) {
+        return res.status(400).json({ error: 'Username, phone/email, and password are required' });
+    }
+    if (username.length < 3) {
+        return res.status(400).json({ error: 'Username must be at least 3 characters' });
+    }
+    if (password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
 
-    const phoneRegex = /^(\+234|0)[789][01]\d{8}$/;
-    if (!phoneRegex.test(phone)) return res.status(400).json({ error: 'Invalid Nigerian phone number' });
+    const idTrim = identifier.trim();
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) return res.status(400).json({ error: 'Invalid email address' });
+    let email = null;
+    let phone = null;
+
+    if (isEmail(idTrim)) {
+        email = idTrim.toLowerCase();
+    } else if (isPhone(idTrim)) {
+        phone = normalizePhone(idTrim);
+    } else {
+        return res.status(400).json({ error: 'Enter a valid email address or Nigerian phone number' });
+    }
 
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        const exists = await client.query('SELECT id FROM users WHERE email = $1 OR username = $2', [email, username]);
-        if (exists.rows.length) {
+        // Check username uniqueness
+        const userExists = await client.query('SELECT id FROM users WHERE username = $1', [username]);
+        if (userExists.rows.length) {
             await client.query('ROLLBACK');
-            return res.status(400).json({ error: 'User with that email or username already exists' });
+            return res.status(400).json({ error: 'Username already taken' });
+        }
+
+        // Check email/phone uniqueness
+        if (email) {
+            const emExists = await client.query('SELECT id FROM users WHERE LOWER(email) = $1', [email]);
+            if (emExists.rows.length) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: 'An account with that email already exists' });
+            }
+        }
+        if (phone) {
+            const phExists = await client.query('SELECT id FROM users WHERE phone = $1', [phone]);
+            if (phExists.rows.length) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: 'An account with that phone number already exists' });
+            }
         }
 
         let referrer = null, referralApplied = false, refCodeUsed = null;
@@ -387,9 +446,9 @@ app.post('/api/register', async (req, res) => {
         const newReferralCode = `MNG${Date.now().toString(36).toUpperCase()}`;
 
         const insert = await client.query(
-            `INSERT INTO users (username, email, password, phone, balance, referral_code, referred_by, referral_code_used)
+            `INSERT INTO users (username, email, phone, password, balance, referral_code, referred_by, referral_code_used)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-            [username, email, hashedPassword, phone, signupBonus, newReferralCode,
+            [username, email, phone, hashedPassword, signupBonus, newReferralCode,
              referrer ? referrer.id : null, refCodeUsed]
         );
         const newUser = insert.rows[0];
@@ -428,16 +487,24 @@ app.post('/api/register', async (req, res) => {
 });
 
 app.post('/api/login', async (req, res) => {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    const { identifier, password } = req.body;
+
+    if (!identifier || !password) {
+        return res.status(400).json({ error: 'Phone/email and password required' });
+    }
 
     try {
-        const user = await findUserByEmail(email);
+        const user = await findUserByIdentifier(identifier);
         if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
         const valid = await bcrypt.compare(password, user.password);
         if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
         res.json({ message: 'Login successful!', user: sanitizeUser(user) });
-    } catch { res.status(500).json({ error: 'Login failed. Try again.' }); }
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ error: 'Login failed. Try again.' });
+    }
 });
 
 // ==================== USER ====================
@@ -504,12 +571,9 @@ app.get('/api/tasks/:userId', async (req, res) => {
             const currentVideo = p && p.current_video_id ? videoMap[p.current_video_id] : null;
             const effectiveStatus = computeEffectiveStatus(task, p);
 
-            // Compute "renews on" for completed renew-after-days tasks
             let renewsOn = null;
             if (p && p.status === 'completed' && task.renew_after_days && task.renew_after_days > 0 && p.completed_at) {
-                const renewDate = new Date(
-                    new Date(p.completed_at).getTime() + task.renew_after_days * 24 * 60 * 60 * 1000
-                );
+                const renewDate = new Date(new Date(p.completed_at).getTime() + task.renew_after_days * 24 * 60 * 60 * 1000);
                 renewsOn = renewDate.toISOString();
             }
 
@@ -583,7 +647,6 @@ app.post('/api/tasks/start', async (req, res) => {
             return res.status(400).json({ error: 'Task awaiting admin approval' });
         }
 
-        // Evaluate renewal rules
         const effectiveStatus = computeEffectiveStatus(task, progress);
         if (effectiveStatus === 'completed') {
             return res.status(400).json({ error: 'Task not yet renewable. Check back later.' });
@@ -603,7 +666,6 @@ app.post('/api/tasks/start', async (req, res) => {
             });
         }
 
-        // Pick a video for video tasks
         let video = null;
         if (task.verification === 'video') {
             video = await pickRandomVideoForUser(userId);
@@ -614,11 +676,8 @@ app.post('/api/tasks/start', async (req, res) => {
 
         const update = await pool.query(
             `UPDATE task_progress
-             SET status = 'started',
-                 started_at = NOW(),
-                 current_video_id = $1
-             WHERE user_id = $2 AND task_id = $3
-             RETURNING *`,
+             SET status = 'started', started_at = NOW(), current_video_id = $1
+             WHERE user_id = $2 AND task_id = $3 RETURNING *`,
             [video ? video.id : null, userId, taskId]
         );
 
@@ -680,7 +739,6 @@ app.post('/api/tasks/complete', async (req, res) => {
             }
         }
 
-        // ---- Video resolution ----
         let usedVideoId = null;
         if (task.verification === 'video') {
             let vid = null;
@@ -691,18 +749,13 @@ app.post('/api/tasks/complete', async (req, res) => {
             if (!vid && progress.current_video_id) vid = progress.current_video_id;
             if (!vid) {
                 const fallback = await client.query(
-                    `SELECT id FROM videos
-                     WHERE active = TRUE
-                       AND id NOT IN (SELECT video_id FROM user_videos WHERE user_id = $1)
-                     ORDER BY RANDOM() LIMIT 1`,
+                    `SELECT id FROM videos WHERE active = TRUE AND id NOT IN (SELECT video_id FROM user_videos WHERE user_id = $1) ORDER BY RANDOM() LIMIT 1`,
                     [userId]
                 );
                 if (fallback.rows.length) vid = fallback.rows[0].id;
             }
             if (!vid) {
-                const any = await client.query(
-                    `SELECT id FROM videos WHERE active = TRUE ORDER BY RANDOM() LIMIT 1`
-                );
+                const any = await client.query(`SELECT id FROM videos WHERE active = TRUE ORDER BY RANDOM() LIMIT 1`);
                 if (any.rows.length) vid = any.rows[0].id;
             }
             if (!vid) {
@@ -710,7 +763,6 @@ app.post('/api/tasks/complete', async (req, res) => {
                 return res.status(503).json({ error: 'No videos available. Try again later.' });
             }
             usedVideoId = vid;
-
             await client.query(
                 `INSERT INTO user_videos (user_id, video_id, task_id)
                  VALUES ($1, $2, $3)
@@ -719,15 +771,13 @@ app.post('/api/tasks/complete', async (req, res) => {
             );
         }
 
-        // ---- Proof tasks → pending ----
         if (task.verification === 'proof' || task.verification === 'admin') {
             if (!proofUrl || typeof proofUrl !== 'string' || proofUrl.trim().length < 10) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ error: 'Please provide proof to submit this task' });
             }
             await client.query(
-                `UPDATE task_progress
-                 SET status = 'pending', proof_url = $1, completed_at = NOW(), current_video_id = NULL
+                `UPDATE task_progress SET status = 'pending', proof_url = $1, completed_at = NOW(), current_video_id = NULL
                  WHERE user_id = $2 AND task_id = $3`,
                 [proofUrl.trim(), userId, taskId]
             );
@@ -735,68 +785,47 @@ app.post('/api/tasks/complete', async (req, res) => {
             await client.query('COMMIT');
             return res.json({
                 message: 'Submitted for review. Reward will be credited after approval.',
-                pending: true,
-                reward: task.reward
+                pending: true, reward: task.reward
             });
         }
 
-        // ---- Timed / Video tasks → auto-approve ----
         await client.query(
-            `INSERT INTO task_completions (user_id, task_id, reward, video_id)
-             VALUES ($1, $2, $3, $4)`,
+            `INSERT INTO task_completions (user_id, task_id, reward, video_id) VALUES ($1, $2, $3, $4)`,
             [userId, taskId, task.reward, usedVideoId]
         );
 
-        // Reset progress based on task rules
         if (task.repeatable) {
-            // Video, Article, Social: immediately available again after cooldown
             await client.query(
-                `UPDATE task_progress
-                 SET status = 'available', started_at = NULL, completed_at = NOW(), current_video_id = NULL
-                 WHERE user_id = $1 AND task_id = $2`,
-                [userId, taskId]
-            );
-        } else if (task.renew_after_days && task.renew_after_days > 0) {
-            // Survey: stays completed until N days pass
-            await client.query(
-                `UPDATE task_progress
-                 SET status = 'completed', completed_at = NOW(), current_video_id = NULL
+                `UPDATE task_progress SET status = 'available', started_at = NULL, completed_at = NOW(), current_video_id = NULL
                  WHERE user_id = $1 AND task_id = $2`,
                 [userId, taskId]
             );
         } else {
-            // Download: one-time forever
             await client.query(
-                `UPDATE task_progress
-                 SET status = 'completed', completed_at = NOW(), current_video_id = NULL
+                `UPDATE task_progress SET status = 'completed', completed_at = NOW(), current_video_id = NULL
                  WHERE user_id = $1 AND task_id = $2`,
                 [userId, taskId]
             );
         }
 
         const updated = await client.query(
-            `UPDATE users SET balance = balance + $1, tasks_completed = tasks_completed + 1
-             WHERE id = $2 RETURNING balance`,
+            `UPDATE users SET balance = balance + $1, tasks_completed = tasks_completed + 1 WHERE id = $2 RETURNING balance`,
             [task.reward, userId]
         );
 
         await client.query('COMMIT');
-
         res.json({
             message: 'Task completed!',
             reward: task.reward,
             newBalance: updated.rows[0].balance,
             cooldownRemaining: TASK_COOLDOWN_SECONDS,
-            repeatable: task.repeatable,
-            renewAfterDays: task.renew_after_days
+            repeatable: task.repeatable
         });
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('Task complete error:', err);
         res.status(500).json({ error: 'Failed to complete task' });
-    } finally {
-        client.release();
-    }
+    } finally { client.release(); }
 });
 
 // ==================== TRANSFERS ====================
@@ -805,11 +834,8 @@ app.get('/api/withdraw/window', (req, res) => {
     const open = isTransferWindowOpen();
     const next = nextTransferWindowStart();
     res.json({
-        open,
-        nextWindow: next.toISOString(),
-        nextWindowLabel: formatWindowDate(next),
-        windowStartDay: TRANSFER_WINDOW_START_DAY,
-        windowEndDay: TRANSFER_WINDOW_END_DAY,
+        open, nextWindow: next.toISOString(), nextWindowLabel: formatWindowDate(next),
+        windowStartDay: TRANSFER_WINDOW_START_DAY, windowEndDay: TRANSFER_WINDOW_END_DAY,
         minTransfer: MIN_TRANSFER
     });
 });
@@ -866,18 +892,14 @@ app.post('/api/withdraw', async (req, res) => {
 
         await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [amt, userId]);
         await client.query(
-            `INSERT INTO withdrawals (user_id, amount, bank_name, account_number, status)
-             VALUES ($1,$2,$3,$4,'processing')`,
+            `INSERT INTO withdrawals (user_id, amount, bank_name, account_number, status) VALUES ($1,$2,$3,$4,'processing')`,
             [userId, amt, bankName, accountNumber]
         );
         await client.query('DELETE FROM withdraw_starts WHERE user_id = $1', [userId]);
         const bal = await client.query('SELECT balance FROM users WHERE id = $1', [userId]);
 
         await client.query('COMMIT');
-        res.json({
-            message: 'Transfer request submitted!',
-            amount: amt, newBalance: bal.rows[0].balance, bankName, accountNumber
-        });
+        res.json({ message: 'Transfer request submitted!', amount: amt, newBalance: bal.rows[0].balance, bankName, accountNumber });
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('Withdraw error:', err);
@@ -896,9 +918,8 @@ app.get('/api/withdrawals/:userId', async (req, res) => {
             [userId]
         );
         res.json(rows.map(r => ({
-            id: r.id, amount: r.amount, bankName: r.bank_name,
-            accountNumber: r.account_number, status: r.status,
-            requestedAt: r.requested_at, processedAt: r.processed_at
+            id: r.id, amount: r.amount, bankName: r.bank_name, accountNumber: r.account_number,
+            status: r.status, requestedAt: r.requested_at, processedAt: r.processed_at
         })));
     } catch { res.status(500).json({ error: 'Failed to load history' }); }
 });
@@ -912,13 +933,14 @@ app.get('/api/cpx-hash/:userId', async (req, res) => {
         if (!user) return res.status(404).json({ error: 'User not found' });
         if (!process.env.CPX_SECURE_HASH) return res.status(500).json({ error: 'CPX hash not configured' });
 
-        const hash = crypto.createHash('md5')
-            .update(`${userId}-${process.env.CPX_SECURE_HASH}`)
-            .digest('hex');
+        const hash = crypto.createHash('md5').update(`${userId}-${process.env.CPX_SECURE_HASH}`).digest('hex');
 
         res.json({
             appId: process.env.CPX_APP_ID,
-            userId: user.id, username: user.username, email: user.email, hash
+            userId: user.id,
+            username: user.username,
+            email: user.email || user.phone,
+            hash
         });
     } catch { res.status(500).json({ error: 'Failed to generate hash' }); }
 });
@@ -987,7 +1009,7 @@ app.get('/api/admin/pending', async (req, res) => {
     try {
         const { rows } = await pool.query(
             `SELECT tp.user_id, tp.task_id, tp.proof_url, tp.completed_at,
-                    u.username, u.email, t.title AS task_title, t.reward
+                    u.username, u.email, u.phone, t.title AS task_title, t.reward
              FROM task_progress tp
              JOIN users u ON u.id = tp.user_id
              JOIN tasks t ON t.id = tp.task_id
@@ -995,7 +1017,7 @@ app.get('/api/admin/pending', async (req, res) => {
              ORDER BY tp.completed_at DESC`
         );
         res.json(rows.map(r => ({
-            userId: r.user_id, username: r.username, email: r.email,
+            userId: r.user_id, username: r.username, email: r.email, phone: r.phone,
             taskId: r.task_id, taskTitle: r.task_title, reward: r.reward,
             proofUrl: r.proof_url, submittedAt: r.completed_at
         })));
@@ -1022,23 +1044,13 @@ app.post('/api/admin/review', async (req, res) => {
         await client.query('UPDATE users SET pending_balance = GREATEST(0, pending_balance - $1) WHERE id = $2', [task.reward, userId]);
 
         if (approve) {
-            // Determine resulting status based on task rules
-            if (task.repeatable) {
-                await client.query(
-                    `UPDATE task_progress
-                     SET status = 'available', started_at = NULL, completed_at = NOW(), proof_url = NULL, admin_note = $1
-                     WHERE user_id = $2 AND task_id = $3`,
-                    [note || null, userId, taskId]
-                );
-            } else {
-                // Survey (renew_after_days) or Download (one-time) → stays 'completed'
-                await client.query(
-                    `UPDATE task_progress
-                     SET status = 'completed', admin_note = $1
-                     WHERE user_id = $2 AND task_id = $3`,
-                    [note || null, userId, taskId]
-                );
-            }
+            const finalStatus = task.repeatable ? 'available' : 'completed';
+
+            await client.query(
+                `UPDATE task_progress SET status = $1, admin_note = $2, completed_at = NOW()
+                 WHERE user_id = $3 AND task_id = $4`,
+                [finalStatus, note || null, userId, taskId]
+            );
 
             await client.query(
                 `INSERT INTO task_completions (user_id, task_id, reward) VALUES ($1, $2, $3)`,
@@ -1110,9 +1122,8 @@ app.get('/api/admin/transfers', async (req, res) => {
     try {
         const { rows } = await pool.query('SELECT * FROM withdrawals ORDER BY requested_at DESC');
         res.json(rows.map(r => ({
-            id: r.id, userId: r.user_id, amount: r.amount,
-            bankName: r.bank_name, accountNumber: r.account_number,
-            status: r.status, requestedAt: r.requested_at,
+            id: r.id, userId: r.user_id, amount: r.amount, bankName: r.bank_name,
+            accountNumber: r.account_number, status: r.status, requestedAt: r.requested_at,
             processedAt: r.processed_at, adminNote: r.admin_note
         })));
     } catch { res.status(500).json({ error: 'Failed to load transfers' }); }
@@ -1122,7 +1133,6 @@ app.post('/api/admin/videos', async (req, res) => {
     const { adminKey, url, title } = req.body;
     if (adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
     if (!url) return res.status(400).json({ error: 'URL required' });
-
     try {
         const { rows } = await pool.query(
             `INSERT INTO videos (url, title) VALUES ($1, $2) RETURNING *`,
