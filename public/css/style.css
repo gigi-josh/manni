@@ -937,6 +937,136 @@ textarea {
     font-style: italic;
     margin-bottom: 8px;
 }
+.referral-widget {
+    background: var(--white);
+    padding: 24px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 24px;
+}
+
+.referral-widget h3 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.referral-sub {
+    color: var(--accent);
+    font-size: 0.88rem;
+    margin-bottom: 16px;
+}
+
+.referral-link-box {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.referral-link-box input {
+    flex: 1;
+    padding: 12px 14px;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    background: var(--bg-light);
+    font-family: 'Courier New', monospace;
+    color: var(--secondary);
+    min-width: 0;
+}
+
+.referral-link-box .btn {
+    flex-shrink: 0;
+    padding: 10px 16px;
+}
+
+.referral-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.referral-stats > div {
+    background: var(--primary-light);
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ref-stat-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.ref-stat-value {
+    font-size: 1.3rem;
+    font-weight: 800;
+    color: var(--primary);
+}
+
+.referral-share {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.referral-share .btn {
+    flex: 1;
+    min-width: 140px;
+    font-size: 0.85rem;
+}
+
+.referral-list-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin-top: 18px;
+    margin-bottom: 10px;
+    color: var(--secondary);
+}
+
+.referral-list {
+    display: grid;
+    gap: 8px;
+}
+
+.referral-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-light);
+    border-radius: var(--radius-sm);
+    font-size: 0.88rem;
+    flex-wrap: wrap;
+}
+
+.referral-status {
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--success);
+}
+
+@media (max-width: 640px) {
+    .referral-link-box {
+        flex-direction: column;
+    }
+
+    .referral-share .btn {
+        width: 100%;
+    }
+
+    .referral-stats {
+        grid-template-columns: 1fr;
+    }
+}
 /* ================= LEGAL PAGES (Privacy, Terms) ================= */
 .legal-page {
     padding: 40px 0 60px;
