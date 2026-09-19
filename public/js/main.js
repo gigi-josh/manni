@@ -335,7 +335,7 @@ function renderTaskCard(task) {
             break;
 
         case 'started': {
-            const activeVideo = activeVideos[task.id];
+            const activeVideo = activeVideos[task.id] || task.currentVideo;
             const videoHtml = (task.verification === 'video' && activeVideo)
                 ? `<div class="task-video">
                        <iframe src="${escapeAttr(activeVideo.url)}"
