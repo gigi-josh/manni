@@ -32,7 +32,6 @@ const Auth = {
 const Popunder = {
     src: "https://pl31287847.profitableratecpmnetwork.com/45/6c/f2/456cf2a7c0671bb8bdb1924b6cee4621.js",
 
-    // Fires at most once per browser session
     fire() {
         if (sessionStorage.getItem('mannieng_popunder_fired')) return;
         sessionStorage.setItem('mannieng_popunder_fired', '1');
@@ -44,22 +43,17 @@ const Popunder = {
             s.referrerPolicy = 'no-referrer-when-downgrade';
             document.body.appendChild(s);
         } catch (e) {
-            // silent fail — ads should never break the app
+            // silent fail
         }
     }
 };
 
-// Track active timers so we can clear them on reload
-const activeTimers = {};
-
-// Cache tasks
+// ================= STATE =================
+const activeTimers = {};       // per-task timers (startedAt → minSeconds)
 let taskCache = [];
-
-// Pending withdrawal payload
 let pendingWithdrawal = null;
-
-// Withdraw ad interval handle
 let withdrawAdInterval = null;
+let cooldownInterval = null;   // cooldown banner timer
 
 // ================= REGISTER =================
 async function register(event) {
@@ -169,19 +163,28 @@ async function loadTasks() {
     const user = Auth.getUser();
     if (!user) return;
 
+    // Clear per-task timers
     Object.values(activeTimers).forEach(id => clearInterval(id));
     Object.keys(activeTimers).forEach(k => delete activeTimers[k]);
 
     try {
         const res = await fetch(`/api/tasks/${user.id}`);
-        const tasks = await res.json();
+        const data = await res.json();
 
         if (!res.ok) {
             document.getElementById('tasksContainer').innerHTML = '<p>Failed to load tasks.</p>';
             return;
         }
 
+        // ---- New response shape: { tasks, cooldownRemaining, cooldownTotal } ----
+        const tasks = Array.isArray(data) ? data : (data.tasks || []);
+        const cooldownRemaining = data.cooldownRemaining || 0;
+        const cooldownTotal = data.cooldownTotal || 120;
+
         taskCache = tasks;
+
+        // Render cooldown banner above task list
+        renderCooldownBanner(cooldownRemaining, cooldownTotal);
 
         const container = document.getElementById('tasksContainer');
         container.innerHTML = '';
@@ -274,6 +277,62 @@ function renderTaskCard(task) {
     return card;
 }
 
+// ================= COOLDOWN BANNER =================
+function renderCooldownBanner(remaining, total) {
+    const existing = document.getElementById('cooldownBanner');
+    if (existing) existing.remove();
+
+    if (cooldownInterval) {
+        clearInterval(cooldownInterval);
+        cooldownInterval = null;
+    }
+
+    if (!remaining || remaining <= 0) return;
+
+    const tasksSection = document.querySelector('.tasks-section');
+    if (!tasksSection) return;
+
+    const banner = document.createElement('div');
+    banner.id = 'cooldownBanner';
+    banner.className = 'cooldown-banner';
+
+    // Insert after the "Available Tasks" heading
+    const heading = tasksSection.querySelector('h2');
+    if (heading && heading.nextSibling) {
+        tasksSection.insertBefore(banner, heading.nextSibling);
+    } else {
+        tasksSection.insertBefore(banner, tasksSection.firstChild);
+    }
+
+    let seconds = remaining;
+
+    const render = () => {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        banner.innerHTML = `
+            <i class="fas fa-hourglass-half"></i>
+            <div>
+                <strong>Cooldown active</strong>
+                <span>Next task unlocks in ${m}:${String(s).padStart(2, '0')}</span>
+            </div>
+        `;
+    };
+
+    render();
+
+    cooldownInterval = setInterval(() => {
+        seconds--;
+        if (seconds <= 0) {
+            clearInterval(cooldownInterval);
+            cooldownInterval = null;
+            banner.remove();
+            loadTasks(); // refresh to unlock tasks
+        } else {
+            render();
+        }
+    }, 1000);
+}
+
 // ================= START TASK =================
 async function startTask(taskId) {
     const user = Auth.getUser();
@@ -292,6 +351,10 @@ async function startTask(taskId) {
 
         if (res.ok) {
             loadTasks();
+        } else if (res.status === 429 && data.cooldownRemaining) {
+            // Server told us we're in cooldown
+            renderCooldownBanner(data.cooldownRemaining, data.cooldownRemaining);
+            loadTasks();
         } else {
             alert(data.error || 'Could not start task');
         }
@@ -300,7 +363,7 @@ async function startTask(taskId) {
     }
 }
 
-// ================= TIMER =================
+// ================= PER-TASK TIMER =================
 function startTimer(taskId, startedAt, minSeconds, verification) {
     const valueEl = document.querySelector(`.timer-value[data-task-id="${taskId}"]`);
     const timerBox = document.getElementById(`timer-${taskId}`);
@@ -368,7 +431,7 @@ async function completeTask(taskId) {
             if (data.pending) {
                 alert(`⏳ Submitted for review.\n₦${data.reward} will be credited after approval.`);
             } else {
-                alert(`✅ Task completed!\nYou earned ₦${data.reward}`);
+                alert(`✅ Task completed!\nYou earned ₦${data.reward}\n\nNext task unlocks in 2 minutes.`);
             }
             loadDashboard();
         } else {
@@ -379,7 +442,7 @@ async function completeTask(taskId) {
     }
 }
 
-// ================= WITHDRAW (with 10-min ad modal) =================
+// ================= WITHDRAW (Dashboard modal — if still used) =================
 async function withdraw(event) {
     event.preventDefault();
 
@@ -390,8 +453,8 @@ async function withdraw(event) {
     const bankName = document.getElementById('bankName').value;
     const accountNumber = document.getElementById('accountNumber').value.trim();
 
-    if (!amount || amount < 100) {
-        return showMessage('withdrawMessage', 'Minimum withdrawal is ₦100', 'error');
+    if (!amount || amount < 2500) {
+        return showMessage('withdrawMessage', 'Minimum transfer is ₦2,500', 'error');
     }
     if (!bankName) {
         return showMessage('withdrawMessage', 'Please select a bank', 'error');
@@ -410,7 +473,6 @@ function openWithdrawAdModal() {
         return submitWithdrawal();
     }
 
-    // 🔥 Fire Adsterra Popunder on withdraw action
     Popunder.fire();
 
     const timerEl = document.getElementById('withdrawTimer');
@@ -487,13 +549,14 @@ async function submitWithdrawal() {
         if (res.ok) {
             showMessage(
                 'withdrawMessage',
-                `✅ ₦${data.amount} withdrawal to ${data.bankName} (${data.accountNumber}) submitted!`,
+                `✅ ₦${data.amount.toLocaleString()} transfer to ${data.bankName} (${data.accountNumber}) submitted!`,
                 'success'
             );
-            document.getElementById('withdrawForm').reset();
+            const form = document.getElementById('withdrawForm');
+            if (form) form.reset();
             loadDashboard();
         } else {
-            showMessage('withdrawMessage', data.error || 'Withdrawal failed', 'error');
+            showMessage('withdrawMessage', data.error || 'Transfer failed', 'error');
         }
     } catch {
         closeWithdrawAdModal();
@@ -533,7 +596,7 @@ async function loadWithdrawalHistory() {
         const list = await res.json();
 
         if (!res.ok || !list.length) {
-            container.innerHTML = '<p class="empty-state">No withdrawals yet.</p>';
+            container.innerHTML = '<p class="empty-state">No transfers yet.</p>';
             return;
         }
 
@@ -558,7 +621,7 @@ function showMessage(elementId, message, type) {
     el.textContent = message;
     el.className = `message message-${type}`;
     el.style.display = 'block';
-    setTimeout(() => (el.style.display = 'none'), 5000);
+    setTimeout(() => (el.style.display = 'none'), 6000);
 }
 
 function escapeHtml(str) {
@@ -580,20 +643,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const path = window.location.pathname;
     const user = Auth.getUser();
 
+    // Redirect logged-in users away from public pages
     if (user && (path === '/' || path === '/login' || path === '/register')) {
         window.location.href = '/dashboard';
         return;
     }
 
+    // Wire auth forms (login/register pages only)
     const registerForm = document.getElementById('registerForm');
     if (registerForm) registerForm.addEventListener('submit', register);
 
     const loginForm = document.getElementById('loginForm');
     if (loginForm) loginForm.addEventListener('submit', login);
 
+    // Wire dashboard withdraw form (if still present)
     const withdrawForm = document.getElementById('withdrawForm');
     if (withdrawForm) withdrawForm.addEventListener('submit', withdraw);
 
+    // Load dashboard data on /dashboard
     if (path === '/dashboard') {
         loadDashboard();
     }
