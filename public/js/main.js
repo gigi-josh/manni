@@ -70,13 +70,21 @@ function loadActiveVideos() {
     } catch {}
 }
 
+// ================= VALIDATORS =================
+function isValidEmail(str) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str);
+}
+
+function isValidPhone(str) {
+    return /^(\+234|0)[789][01]\d{8}$/.test(str);
+}
+
 // ================= REGISTER =================
 async function register(event) {
     event.preventDefault();
 
     const username = document.getElementById('username').value.trim();
-    const email = document.getElementById('email').value.trim();
-    const phone = document.getElementById('phone').value.trim();
+    const identifier = document.getElementById('identifier').value.trim();
     const password = document.getElementById('password').value;
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -88,17 +96,15 @@ async function register(event) {
     if (password.length < 6) {
         return showMessage('registerMessage', 'Password must be at least 6 characters', 'error');
     }
-
-    const phoneRegex = /^(\+234|0)[789][01]\d{8}$/;
-    if (!phoneRegex.test(phone)) {
-        return showMessage('registerMessage', 'Enter a valid Nigerian phone number (e.g. 08012345678)', 'error');
+    if (!isValidEmail(identifier) && !isValidPhone(identifier)) {
+        return showMessage('registerMessage', 'Enter a valid email address or Nigerian phone number (e.g. 08012345678)', 'error');
     }
 
     try {
         const res = await fetch('/api/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, email, phone, password, ref })
+            body: JSON.stringify({ username, identifier, password, ref })
         });
         const data = await res.json();
 
@@ -121,14 +127,18 @@ async function register(event) {
 async function login(event) {
     event.preventDefault();
 
-    const email = document.getElementById('email').value.trim();
+    const identifier = document.getElementById('identifier').value.trim();
     const password = document.getElementById('password').value;
+
+    if (!identifier || !password) {
+        return showMessage('loginMessage', 'Enter your phone/email and password', 'error');
+    }
 
     try {
         const res = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify({ identifier, password })
         });
         const data = await res.json();
 
@@ -298,10 +308,8 @@ async function loadTasks() {
             return;
         }
 
-        // Step 1: Append all cards first
         tasks.forEach(task => container.appendChild(renderTaskCard(task)));
 
-        // Step 2: Start timers AFTER cards are in the DOM
         tasks.forEach(task => {
             if (task.status === 'started' && task.startedAt) {
                 startTimer(task.id, task.startedAt, task.minSeconds || 0, task.verification);
@@ -319,15 +327,19 @@ function renderTaskCard(task) {
     let actionHtml = '';
 
     switch (task.status) {
-        case 'completed':
-        case 'completed':
-           if (task.renewsOn) {
-             const daysLeft = Math.ceil((new Date(task.renewsOn) - Date.now()) / (1000*60*60*24));
-             actionHtml = `<span class="task-completed">✅ Completed · Renews in ${daysLeft}d</span>`;
-           } else {
-            actionHtml = `<span class="task-completed">✅ Completed</span>`;
-           }    
+        case 'completed': {
+            let completionText = '✅ Completed';
+            if (task.renewsOn) {
+                const daysLeft = Math.max(0, Math.ceil((new Date(task.renewsOn) - Date.now()) / (1000 * 60 * 60 * 24)));
+                if (daysLeft > 0) {
+                    completionText = `✅ Completed · Renews in ${daysLeft}d`;
+                } else {
+                    completionText = '✅ Completed';
+                }
+            }
+            actionHtml = `<span class="task-completed">${completionText}</span>`;
             break;
+        }
 
         case 'pending':
             actionHtml = `<span class="task-pending">⏳ Awaiting approval</span>`;
@@ -508,7 +520,6 @@ function startTimer(taskId, startedAt, minSeconds, verification) {
         return;
     }
 
-    // Parse the start time — supports both ISO string and Date object
     const startMs = new Date(startedAt).getTime();
     if (isNaN(startMs)) {
         console.warn(`[timer] Invalid startedAt for task ${taskId}:`, startedAt);
@@ -564,7 +575,7 @@ async function completeTask(taskId) {
     }
 
     if (task.verification === 'video') {
-        const v = activeVideos[taskId];
+        const v = activeVideos[taskId] || task.currentVideo;
         videoId = v && v.id ? v.id : null;
     }
 
@@ -817,4 +828,3 @@ document.addEventListener('DOMContentLoaded', () => {
         loadDashboard();
     }
 });
-
