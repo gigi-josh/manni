@@ -34,6 +34,8 @@ const RATE_LIMIT_PER_HOUR = 10;
 const STREAK_TARGET_DAYS = 30;
 const STREAK_BONUS_NGN = 7000;
 
+const FLW_BASE = 'https://api.flutterwave.com/v3';
+
 // ---------- Helpers ----------
 function isTransferWindowOpen() {
     const day = new Date().getDate();
@@ -51,11 +53,10 @@ function formatWindowDate(date) {
     return date.toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-// Nigeria time helpers (UTC+1)
 function nigeriaDateString(offsetDays = 0) {
     const now = new Date();
     const nigerianTime = new Date(now.getTime() + 60 * 60 * 1000 + offsetDays * 24 * 60 * 60 * 1000);
-    return nigerianTime.toISOString().slice(0, 10); // "YYYY-MM-DD"
+    return nigerianTime.toISOString().slice(0, 10);
 }
 
 function isEmail(str) {
@@ -167,6 +168,56 @@ function computeEffectiveStatus(task, progress) {
     return baseStatus;
 }
 
+// ==================== FLUTTERWAVE HELPERS ====================
+
+async function flwRequest(endpoint, method = 'GET', body = null) {
+    const options = {
+        method,
+        headers: {
+            'Authorization': `Bearer ${process.env.FLW_SECRET_KEY}`,
+            'Content-Type': 'application/json'
+        }
+    };
+    if (body) options.body = JSON.stringify(body);
+
+    const res = await fetch(`${FLW_BASE}${endpoint}`, options);
+    const data = await res.json();
+
+    if (!res.ok) {
+        console.error('Flutterwave error:', data);
+        throw new Error(data.message || 'Flutterwave request failed');
+    }
+    return data;
+}
+
+// Initiate a transfer to a bank account
+async function flwInitiateTransfer({ accountBank, accountNumber, amountNaira, narration, reference }) {
+    // 1. Create recipient (or reuse if we already stored one)
+    // We'll create fresh each time — Flutterwave dedupes internally.
+    const recipientRes = await flwRequest('/transfers/recipients', 'POST', {
+        type: 'nuban',
+        name: 'MannieNG User',
+        account_number: accountNumber,
+        bank_code: accountBank,
+        currency: 'NGN'
+    });
+
+    const recipientId = recipientRes.data.id;
+
+    // 2. Initiate transfer
+    const transferRes = await flwRequest('/transfers', 'POST', {
+        account_bank: accountBank,
+        account_number: accountNumber,
+        amount: amountNaira,
+        narration: narration || 'MannieNG payout',
+        currency: 'NGN',
+        reference: reference,
+        debit_currency: 'NGN'
+    });
+
+    return transferRes.data;
+}
+
 // ==================== DB INIT ====================
 async function initDb() {
     try {
@@ -250,8 +301,11 @@ async function initDb() {
                 user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
                 amount INTEGER NOT NULL,
                 bank_name VARCHAR(100) NOT NULL,
+                bank_code VARCHAR(10),
                 account_number VARCHAR(10) NOT NULL,
                 status VARCHAR(20) DEFAULT 'processing',
+                flw_reference VARCHAR(100),
+                flw_transfer_id VARCHAR(100),
                 requested_at TIMESTAMP DEFAULT NOW(),
                 processed_at TIMESTAMP,
                 admin_note TEXT
@@ -275,11 +329,10 @@ async function initDb() {
             CREATE INDEX IF NOT EXISTS idx_task_completions_user ON task_completions(user_id);
             CREATE INDEX IF NOT EXISTS idx_task_completions_time ON task_completions(completed_at);
             CREATE INDEX IF NOT EXISTS idx_withdrawals_user ON withdrawals(user_id);
+            CREATE INDEX IF NOT EXISTS idx_withdrawals_ref ON withdrawals(flw_reference);
             CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code);
             CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
             CREATE INDEX IF NOT EXISTS idx_user_videos_user ON user_videos(user_id);
-            CREATE INDEX IF NOT EXISTS idx_users_email_lower ON users(LOWER(email));
-            CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
         `);
 
         // Safe migrations
@@ -291,9 +344,6 @@ async function initDb() {
                 END IF;
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='phone') THEN
                     ALTER TABLE users ADD COLUMN phone VARCHAR(20) UNIQUE;
-                END IF;
-                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='phone' AND is_nullable='NO') THEN
-                    ALTER TABLE users ALTER COLUMN phone DROP NOT NULL;
                 END IF;
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='task_progress' AND column_name='current_video_id') THEN
                     ALTER TABLE task_progress ADD COLUMN current_video_id INTEGER REFERENCES videos(id);
@@ -309,6 +359,15 @@ async function initDb() {
                 END IF;
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='last_task_date') THEN
                     ALTER TABLE users ADD COLUMN last_task_date DATE;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='withdrawals' AND column_name='bank_code') THEN
+                    ALTER TABLE withdrawals ADD COLUMN bank_code VARCHAR(10);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='withdrawals' AND column_name='flw_reference') THEN
+                    ALTER TABLE withdrawals ADD COLUMN flw_reference VARCHAR(100);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='withdrawals' AND column_name='flw_transfer_id') THEN
+                    ALTER TABLE withdrawals ADD COLUMN flw_transfer_id VARCHAR(100);
                 END IF;
             END $$;
         `);
@@ -357,12 +416,13 @@ async function initDb() {
                 ('https://www.youtube.com/embed/9bZkp7q19f0', 'Fintech in Africa'),
                 ('https://www.youtube.com/embed/kJQP7kiw5Fk', 'Naija Music Hit'),
                 ('https://www.youtube.com/embed/3JZ_D3ELwOQ', 'Lagos City Tour'),
-                ('https://www.youtube.com/embed/hY7m5jjJ9mM', 'Nigerian Food Recipes')
+                ('https://www.youtube.com/embed/h7m5jjJ9mM', 'Nigerian Food Recipes')
             `);
             console.log('✅ Seeded default videos');
         }
 
         console.log('✅ Database tables ready');
+        console.log(`Flutterwave mode: ${process.env.FLW_SECRET_KEY?.startsWith('FLWSECK_TEST') ? 'TEST' : 'LIVE'}`);
     } catch (err) {
         console.error('❌ DB init failed:', err.message);
         throw err;
@@ -460,7 +520,6 @@ app.post('/api/register', async (req, res) => {
                  WHERE id = $2`,
                 [REFERRAL_BONUS_REFERRER, referrer.id]
             );
-            console.log(`Referral: ₦${REFERRAL_BONUS_REFERRER} → ${referrer.username} (from ${newUser.username})`);
         }
 
         await client.query('COMMIT');
@@ -756,7 +815,7 @@ app.post('/api/tasks/complete', async (req, res) => {
             );
         }
 
-        // ---- Proof tasks → pending (no streak credit yet) ----
+        // Proof → pending
         if (task.verification === 'proof' || task.verification === 'admin') {
             if (!proofUrl || typeof proofUrl !== 'string' || proofUrl.trim().length < 10) {
                 await client.query('ROLLBACK');
@@ -775,13 +834,13 @@ app.post('/api/tasks/complete', async (req, res) => {
             });
         }
 
-        // ---- Success path (timed/video tasks) ----
+        // Success path (timed/video)
         await client.query(
             `INSERT INTO task_completions (user_id, task_id, reward, video_id) VALUES ($1, $2, $3, $4)`,
             [userId, taskId, task.reward, usedVideoId]
         );
 
-        // ---- Streak update ----
+        // Streak update
         const today = nigeriaDateString(0);
         const yesterday = nigeriaDateString(-1);
         const lastDate = user.last_task_date
@@ -794,18 +853,16 @@ app.post('/api/tasks/complete', async (req, res) => {
         let streakBonusAwarded = 0;
 
         if (lastDate === today) {
-            // Already did a task today — streak unchanged
+            // no change
         } else if (lastDate === yesterday) {
             newStreak = (user.streak_count || 0) + 1;
         } else {
-            // Streak broken (or first ever task) → reset to 1
             newStreak = 1;
         }
 
         if (newStreak >= STREAK_TARGET_DAYS) {
             streakBonusAwarded = STREAK_BONUS_NGN;
             newStreak = 0;
-            console.log(`🔥 STREAK BONUS: ₦${STREAK_BONUS_NGN} to ${user.username}`);
         }
 
         await client.query(
@@ -813,7 +870,7 @@ app.post('/api/tasks/complete', async (req, res) => {
             [newStreak, today, userId]
         );
 
-        // ---- Task progress reset ----
+        // Progress reset
         if (task.repeatable) {
             await client.query(
                 `UPDATE task_progress SET status = 'available', started_at = NULL, completed_at = NOW(), current_video_id = NULL
@@ -828,7 +885,6 @@ app.post('/api/tasks/complete', async (req, res) => {
             );
         }
 
-        // ---- Credit reward + bonus ----
         const totalCredit = task.reward + streakBonusAwarded;
         const updated = await client.query(
             `UPDATE users SET balance = balance + $1, tasks_completed = tasks_completed + 1 WHERE id = $2 RETURNING balance`,
@@ -859,7 +915,7 @@ app.post('/api/tasks/complete', async (req, res) => {
     } finally { client.release(); }
 });
 
-// ==================== TRANSFERS ====================
+// ==================== TRANSFERS (FLUTTERWAVE) ====================
 
 app.get('/api/withdraw/window', (req, res) => {
     const open = isTransferWindowOpen();
@@ -892,16 +948,18 @@ app.post('/api/withdraw/start', async (req, res) => {
 });
 
 app.post('/api/withdraw', async (req, res) => {
-    const { userId, amount, bankName, accountNumber } = req.body;
+    const { userId, amount, bankName, bankCode, accountNumber } = req.body;
     if (!isTransferWindowOpen()) {
         const next = nextTransferWindowStart();
         return res.status(403).json({
             error: `Transfers are only available from the ${TRANSFER_WINDOW_START_DAY}th to the ${TRANSFER_WINDOW_END_DAY}th of each month. Next window opens on ${formatWindowDate(next)}.`
         });
     }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+
         const userRes = await client.query('SELECT * FROM users WHERE id = $1', [userId]);
         const user = userRes.rows[0];
         if (!user) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'User not found' }); }
@@ -918,19 +976,67 @@ app.post('/api/withdraw', async (req, res) => {
         const amt = parseInt(amount);
         if (!amt || amt < MIN_TRANSFER) { await client.query('ROLLBACK'); return res.status(400).json({ error: `Minimum transfer is ₦${MIN_TRANSFER.toLocaleString()}` }); }
         if (user.balance < amt) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Insufficient balance' }); }
-        if (!bankName || typeof bankName !== 'string') { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Bank name is required' }); }
+        if (!bankName || !bankCode) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Bank selection required' }); }
         if (!/^\d{10}$/.test(accountNumber)) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Account number must be 10 digits' }); }
 
+        // Deduct balance first (reservation)
         await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [amt, userId]);
-        await client.query(
-            `INSERT INTO withdrawals (user_id, amount, bank_name, account_number, status) VALUES ($1,$2,$3,$4,'processing')`,
-            [userId, amt, bankName, accountNumber]
+
+        // Create pending withdrawal record
+        const reference = `MNG-TRF-${userId}-${Date.now()}`;
+        const ins = await client.query(
+            `INSERT INTO withdrawals (user_id, amount, bank_name, bank_code, account_number, status, flw_reference)
+             VALUES ($1,$2,$3,$4,$5,'processing',$6) RETURNING id`,
+            [userId, amt, bankName, bankCode, accountNumber, reference]
         );
+        const withdrawalId = ins.rows[0].id;
+
         await client.query('DELETE FROM withdraw_starts WHERE user_id = $1', [userId]);
-        const bal = await client.query('SELECT balance FROM users WHERE id = $1', [userId]);
 
         await client.query('COMMIT');
-        res.json({ message: 'Transfer request submitted!', amount: amt, newBalance: bal.rows[0].balance, bankName, accountNumber });
+
+        // ---- Now try to send via Flutterwave (outside the transaction) ----
+        // If Flutterwave fails, we refund and mark the withdrawal as failed.
+        try {
+            const result = await flwInitiateTransfer({
+                accountBank: bankCode,
+                accountNumber: accountNumber,
+                amountNaira: amt,
+                narration: `MannieNG transfer #${withdrawalId}`,
+                reference: reference
+            });
+
+            await pool.query(
+                `UPDATE withdrawals SET flw_transfer_id = $1 WHERE id = $2`,
+                [String(result.id || ''), withdrawalId]
+            );
+
+            const balAfter = await pool.query('SELECT balance FROM users WHERE id = $1', [userId]);
+
+            return res.json({
+                message: '✅ Transfer submitted! Funds will arrive within 24 hours.',
+                amount: amt,
+                newBalance: balAfter.rows[0].balance,
+                bankName,
+                accountNumber,
+                reference
+            });
+        } catch (flwErr) {
+            // Refund user & mark failed
+            console.error('Flutterwave transfer failed:', flwErr.message);
+            await pool.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [amt, userId]);
+            await pool.query(
+                `UPDATE withdrawals SET status = 'failed', admin_note = $1, processed_at = NOW() WHERE id = $2`,
+                [`Auto-failed: ${flwErr.message}`, withdrawalId]
+            );
+
+            const balAfter = await pool.query('SELECT balance FROM users WHERE id = $1', [userId]);
+
+            return res.status(502).json({
+                error: `Transfer failed at provider. Your ₦${amt.toLocaleString()} has been refunded. Please try again or use a different bank.`,
+                newBalance: balAfter.rows[0].balance
+            });
+        }
     } catch (err) {
         await client.query('ROLLBACK');
         console.error('Withdraw error:', err);
@@ -953,6 +1059,68 @@ app.get('/api/withdrawals/:userId', async (req, res) => {
             status: r.status, requestedAt: r.requested_at, processedAt: r.processed_at
         })));
     } catch { res.status(500).json({ error: 'Failed to load history' }); }
+});
+
+// ---- Flutterwave webhook (transfer.completed / failed) ----
+app.post('/api/flw-webhook', async (req, res) => {
+    // Verify signature
+    const signature = req.headers['verif-hash'];
+    if (!signature || signature !== process.env.FLW_WEBHOOK_HASH) {
+        return res.status(401).json({ error: 'Invalid signature' });
+    }
+
+    const event = req.body;
+    console.log('Flutterwave webhook:', event.event, event.data?.reference);
+
+    try {
+        if (event.event === 'transfer.completed' || event.event === 'transfer.successful') {
+            const ref = event.data.reference;
+            await pool.query(
+                `UPDATE withdrawals SET status = 'paid', processed_at = NOW() WHERE flw_reference = $1`,
+                [ref]
+            );
+        } else if (event.event === 'transfer.failed' || event.event === 'transfer.reversed') {
+            const ref = event.data.reference;
+            const { rows } = await pool.query(
+                `SELECT * FROM withdrawals WHERE flw_reference = $1 AND status != 'failed'`,
+                [ref]
+            );
+            if (rows.length) {
+                const w = rows[0];
+                await pool.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [w.amount, w.user_id]);
+                await pool.query(
+                    `UPDATE withdrawals SET status = 'failed', processed_at = NOW(), admin_note = $1 WHERE id = $2`,
+                    [`Webhook: ${event.event}`, w.id]
+                );
+            }
+        }
+    } catch (err) {
+        console.error('Webhook processing error:', err);
+    }
+
+    res.json({ ok: true });
+});
+
+// ---- List Nigerian banks (for the frontend dropdown) ----
+app.get('/api/banks', async (req, res) => {
+    try {
+        const data = await flwRequest('/banks/NG');
+        res.json(data.data || []);
+    } catch (err) {
+        console.error('Banks error:', err);
+        // Fallback list of popular Nigerian banks
+        res.json([
+            { code: '058', name: 'GTBank' },
+            { code: '044', name: 'Access Bank' },
+            { code: '011', name: 'First Bank' },
+            { code: '057', name: 'Zenith Bank' },
+            { code: '033', name: 'UBA' },
+            { code: '999992', name: 'Opay' },
+            { code: '999991', name: 'PalmPay' },
+            { code: '50211', name: 'Kuda' },
+            { code: '50515', name: 'Moniepoint' }
+        ]);
+    }
 });
 
 // ==================== CPX ====================
@@ -1033,7 +1201,7 @@ app.all('/api/cpx-webhook', async (req, res) => {
     } finally { client.release(); }
 });
 
-// ==================== ADMIN AUTH ====================
+// ==================== ADMIN ====================
 
 function requireAdmin(req, res, next) {
     const pw = req.headers['x-admin-password'] || req.query.adminPassword || (req.body && req.body.adminPassword);
@@ -1069,12 +1237,9 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
             totalBalances: bal.rows[0].total
         });
     } catch (err) {
-        console.error('Stats error:', err);
         res.status(500).json({ error: 'Failed to load stats' });
     }
 });
-
-// ==================== ADMIN: USERS ====================
 
 app.get('/api/admin/panel/users', requireAdmin, async (req, res) => {
     try {
@@ -1109,7 +1274,6 @@ app.patch('/api/admin/panel/users/:id', requireAdmin, async (req, res) => {
         if (!rows.length) return res.status(404).json({ error: 'User not found' });
         res.json(sanitizeUser(rows[0]));
     } catch (err) {
-        console.error('Update user error:', err);
         res.status(500).json({ error: 'Failed to update user' });
     }
 });
@@ -1120,8 +1284,6 @@ app.delete('/api/admin/panel/users/:id', requireAdmin, async (req, res) => {
         res.json({ ok: true });
     } catch { res.status(500).json({ error: 'Failed to delete user' }); }
 });
-
-// ==================== ADMIN: TASKS ====================
 
 app.get('/api/admin/panel/tasks', requireAdmin, async (req, res) => {
     try {
@@ -1153,13 +1315,8 @@ app.patch('/api/admin/panel/tasks/:id', requireAdmin, async (req, res) => {
         );
         if (!rows.length) return res.status(404).json({ error: 'Task not found' });
         res.json(rows[0]);
-    } catch (err) {
-        console.error('Update task error:', err);
-        res.status(500).json({ error: 'Failed to update task' });
-    }
+    } catch { res.status(500).json({ error: 'Failed to update task' }); }
 });
-
-// ==================== ADMIN: WITHDRAWALS ====================
 
 app.get('/api/admin/panel/withdrawals', requireAdmin, async (req, res) => {
     try {
@@ -1172,8 +1329,6 @@ app.get('/api/admin/panel/withdrawals', requireAdmin, async (req, res) => {
         res.json(rows);
     } catch { res.status(500).json({ error: 'Failed to load withdrawals' }); }
 });
-
-// ==================== ADMIN: VIDEOS ====================
 
 app.get('/api/admin/panel/videos', requireAdmin, async (req, res) => {
     try {
@@ -1201,8 +1356,6 @@ app.delete('/api/admin/panel/videos/:id', requireAdmin, async (req, res) => {
     } catch { res.status(500).json({ error: 'Failed to delete video' }); }
 });
 
-// ==================== ADMIN: COMPLETIONS ====================
-
 app.get('/api/admin/panel/completions', requireAdmin, async (req, res) => {
     try {
         const { rows } = await pool.query(
@@ -1217,8 +1370,7 @@ app.get('/api/admin/panel/completions', requireAdmin, async (req, res) => {
     } catch { res.status(500).json({ error: 'Failed to load completions' }); }
 });
 
-// ==================== ADMIN (legacy) ====================
-
+// Legacy admin endpoints
 app.get('/api/admin/pending', async (req, res) => {
     if (req.query.adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
     try {
@@ -1260,19 +1412,16 @@ app.post('/api/admin/review', async (req, res) => {
 
         if (approve) {
             const finalStatus = task.repeatable ? 'available' : 'completed';
-
             await client.query(
                 `UPDATE task_progress SET status = $1, admin_note = $2, completed_at = NOW()
                  WHERE user_id = $3 AND task_id = $4`,
                 [finalStatus, note || null, userId, taskId]
             );
-
             await client.query(
                 `INSERT INTO task_completions (user_id, task_id, reward) VALUES ($1, $2, $3)`,
                 [userId, taskId, task.reward]
             );
 
-            // Update streak
             const today = nigeriaDateString(0);
             const yesterday = nigeriaDateString(-1);
             const uRes = await client.query('SELECT * FROM users WHERE id = $1', [userId]);
@@ -1291,7 +1440,6 @@ app.post('/api/admin/review', async (req, res) => {
             if (newStreak >= STREAK_TARGET_DAYS) {
                 streakBonusAwarded = STREAK_BONUS_NGN;
                 newStreak = 0;
-                console.log(`🔥 STREAK BONUS (admin approve): ₦${STREAK_BONUS_NGN} to ${u.username}`);
             }
 
             const totalCredit = task.reward + streakBonusAwarded;
@@ -1309,8 +1457,7 @@ app.post('/api/admin/review', async (req, res) => {
                 message: 'Approved', userId, taskId, reward: task.reward,
                 streakBonus: streakBonusAwarded || null,
                 newBalance: updated.rows[0].balance,
-                newPendingBalance: updated.rows[0].pending_balance,
-                streak: { count: newStreak, target: STREAK_TARGET_DAYS }
+                newPendingBalance: updated.rows[0].pending_balance
             });
         } else {
             await client.query(
@@ -1336,66 +1483,33 @@ app.get('/api/admin/users', async (req, res) => {
     } catch { res.status(500).json({ error: 'Failed to load users' }); }
 });
 
-app.post('/api/admin/transfer', async (req, res) => {
-    const { adminKey, adminPassword, transferId, status, note } = req.body;
-    const okKey = adminKey === process.env.ADMIN_KEY;
-    const okPw = adminPassword && adminPassword === process.env.DATABASE_PASSWORD;
-    if (!okKey && !okPw) return res.status(403).json({ error: 'Forbidden' });
-    if (!['processing', 'paid', 'failed'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
-
-    const client = await pool.connect();
+// Admin: manual retry of a stuck transfer
+app.post('/api/admin/panel/retry-transfer/:id', requireAdmin, async (req, res) => {
     try {
-        await client.query('BEGIN');
-        const tRes = await client.query('SELECT * FROM withdrawals WHERE id = $1', [transferId]);
-        const transfer = tRes.rows[0];
-        if (!transfer) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Transfer not found' }); }
+        const { rows } = await pool.query('SELECT * FROM withdrawals WHERE id = $1', [req.params.id]);
+        const w = rows[0];
+        if (!w) return res.status(404).json({ error: 'Not found' });
+        if (w.status === 'paid') return res.status(400).json({ error: 'Already paid' });
 
-        await client.query(
-            `UPDATE withdrawals SET status = $1, processed_at = NOW(), admin_note = $2 WHERE id = $3`,
-            [status, note || null, transferId]
+        // Initiate via Flutterwave
+        const reference = `MNG-TRF-${w.user_id}-${Date.now()}`;
+        const result = await flwInitiateTransfer({
+            accountBank: w.bank_code,
+            accountNumber: w.account_number,
+            amountNaira: w.amount,
+            narration: `MannieNG retry #${w.id}`,
+            reference
+        });
+
+        await pool.query(
+            `UPDATE withdrawals SET status = 'processing', flw_reference = $1, flw_transfer_id = $2, admin_note = 'Retried by admin' WHERE id = $3`,
+            [reference, String(result.id || ''), w.id]
         );
-        if (status === 'failed') {
-            await client.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [transfer.amount, transfer.user_id]);
-        }
-        await client.query('COMMIT');
-        res.json({ ok: true });
+
+        res.json({ ok: true, reference });
     } catch (err) {
-        await client.query('ROLLBACK');
-        res.status(500).json({ error: 'Transfer update failed' });
-    } finally { client.release(); }
-});
-
-app.get('/api/admin/transfers', async (req, res) => {
-    if (req.query.adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
-    try {
-        const { rows } = await pool.query('SELECT * FROM withdrawals ORDER BY requested_at DESC');
-        res.json(rows.map(r => ({
-            id: r.id, userId: r.user_id, amount: r.amount, bankName: r.bank_name,
-            accountNumber: r.account_number, status: r.status, requestedAt: r.requested_at,
-            processedAt: r.processed_at, adminNote: r.admin_note
-        })));
-    } catch { res.status(500).json({ error: 'Failed to load transfers' }); }
-});
-
-app.post('/api/admin/videos', async (req, res) => {
-    const { adminKey, url, title } = req.body;
-    if (adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
-    if (!url) return res.status(400).json({ error: 'URL required' });
-    try {
-        const { rows } = await pool.query(
-            `INSERT INTO videos (url, title) VALUES ($1, $2) RETURNING *`,
-            [url, title || null]
-        );
-        res.json(rows[0]);
-    } catch { res.status(500).json({ error: 'Failed to add video' }); }
-});
-
-app.get('/api/admin/videos', async (req, res) => {
-    if (req.query.adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
-    try {
-        const { rows } = await pool.query('SELECT * FROM videos ORDER BY id DESC');
-        res.json(rows);
-    } catch { res.status(500).json({ error: 'Failed to load videos' }); }
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ==================== HEALTH & START ====================
@@ -1419,8 +1533,8 @@ async function start() {
             console.log(`Cooldown: ${TASK_COOLDOWN_SECONDS}s`);
             console.log(`Referral: ₦${REFERRAL_BONUS_REFERRER} / ₦${REFERRAL_BONUS_NEW_USER}`);
             console.log(`Streak: ${STREAK_TARGET_DAYS} days → ₦${STREAK_BONUS_NGN.toLocaleString()}`);
+            console.log(`Flutterwave: ${process.env.FLW_SECRET_KEY ? (process.env.FLW_SECRET_KEY.startsWith('FLWSECK_TEST') ? 'TEST MODE' : 'LIVE') : 'NOT CONFIGURED'}`);
             console.log(`Window currently: ${isTransferWindowOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
-            if (!process.env.DATABASE_PASSWORD) console.warn('⚠️  DATABASE_PASSWORD not set — /admin will not work');
         });
     } catch (err) {
         console.error('❌ Failed to start:', err);
