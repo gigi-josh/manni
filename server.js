@@ -25,7 +25,7 @@ pool.on('error', (err) => console.error('Unexpected DB error:', err));
 
 // ---------- Constants ----------
 const TRANSFER_WINDOW_START_DAY = 1;
-const TRANSFER_WINDOW_END_DAY = 5;
+const TRANSFER_WINDOW_END_DAY = 23;
 const MIN_TRANSFER = 2500;
 const TASK_COOLDOWN_SECONDS = 120;
 const REFERRAL_BONUS_REFERRER = 600;
