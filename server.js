@@ -334,43 +334,30 @@ async function initDb() {
             CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
             CREATE INDEX IF NOT EXISTS idx_user_videos_user ON user_videos(user_id);
         `);
+        
+        // Safe migrations (idempotent — safe to run every startup)
+const migrations = [
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_count INTEGER DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_task_date DATE`,
+    `ALTER TABLE users ALTER COLUMN email DROP NOT NULL`,
+    `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS repeatable BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS renew_after_days INTEGER`,
+    `ALTER TABLE task_progress ADD COLUMN IF NOT EXISTS current_video_id INTEGER`,
+    `ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS bank_code VARCHAR(10)`,
+    `ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS flw_reference VARCHAR(100)`,
+    `ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS flw_transfer_id VARCHAR(100)`
+];
 
-        // Safe migrations
-        await pool.query(`
-            DO $$
-            BEGIN
-                IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='email' AND is_nullable='NO') THEN
-                    ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='phone') THEN
-                    ALTER TABLE users ADD COLUMN phone VARCHAR(20) UNIQUE;
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='task_progress' AND column_name='current_video_id') THEN
-                    ALTER TABLE task_progress ADD COLUMN current_video_id INTEGER REFERENCES videos(id);
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='repeatable') THEN
-                    ALTER TABLE tasks ADD COLUMN repeatable BOOLEAN DEFAULT FALSE;
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='tasks' AND column_name='renew_after_days') THEN
-                    ALTER TABLE tasks ADD COLUMN renew_after_days INTEGER;
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='streak_count') THEN
-                    ALTER TABLE users ADD COLUMN streak_count INTEGER DEFAULT 0;
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='last_task_date') THEN
-                    ALTER TABLE users ADD COLUMN last_task_date DATE;
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='withdrawals' AND column_name='bank_code') THEN
-                    ALTER TABLE withdrawals ADD COLUMN bank_code VARCHAR(10);
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='withdrawals' AND column_name='flw_reference') THEN
-                    ALTER TABLE withdrawals ADD COLUMN flw_reference VARCHAR(100);
-                END IF;
-                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='withdrawals' AND column_name='flw_transfer_id') THEN
-                    ALTER TABLE withdrawals ADD COLUMN flw_transfer_id VARCHAR(100);
-                END IF;
-            END $$;
-        `);
+for (const sql of migrations) {
+    try {
+        await pool.query(sql);
+    } catch (err) {
+        if (!err.message.includes('already exists') && !err.message.includes('does not exist')) {
+            console.warn('Migration warning:', err.message);
+        }
+    }
+}
 
         // Renewal rules
         await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Watch Video'`);
