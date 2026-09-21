@@ -20,9 +20,22 @@
             <h2>Your task is loading…</h2>
             <p class="ad-sub">Please wait while we prepare your task. Your sponsor below makes MannieNG free for everyone.</p>
 
-            <!-- ================= SPONSORED BANNER (300x250) ================= -->
+            <!-- 728x90 leaderboard (desktop only) -->
+            <div class="ad-slot-leaderboard">
+                <script type="text/javascript">
+                  atOptions = {
+                    'key' : 'fa04bfc85a9e2bd0b4fd95dea0f79783',
+                    'format' : 'iframe',
+                    'height' : 90,
+                    'width' : 728,
+                    'params' : {}
+                  };
+                </script>
+                <script src="https://www.highrevenueformat.com/fa04bfc85a9e2bd0b4fd95dea0f79783/invoke.js"></script>
+            </div>
+
+            <!-- 300x250 sponsored banner -->
             <div class="ad-slot-inline">
-                <!-- Adsterra 300x250 banner -->
                 <script>
                   atOptions = {
                     'key' : '7330eeefe6ee702d2cfca77bd8a7ce0f',
@@ -46,6 +59,20 @@
                 Please wait…
             </button>
 
+            <!-- 468x60 medium banner -->
+            <div class="ad-slot-medium" style="margin-top: 20px;">
+                <script type="text/javascript">
+                  atOptions = {
+                    'key' : 'daa62dd077d6526cef8d655e1f8eb666',
+                    'format' : 'iframe',
+                    'height' : 60,
+                    'width' : 468,
+                    'params' : {}
+                  };
+                </script>
+                <script src="https://www.highrevenueformat.com/daa62dd077d6526cef8d655e1f8eb666/invoke.js"></script>
+            </div>
+
             <a href="/dashboard" class="ad-back">← Back to dashboard</a>
         </div>
     </div>
@@ -58,7 +85,6 @@
         const params = new URLSearchParams(window.location.search);
         const taskUrl = params.get('url') || '';
 
-        // Only allow http/https URLs
         const isSafeUrl = (u) => {
             if (!u) return false;
             try {
