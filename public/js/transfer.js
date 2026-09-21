@@ -96,19 +96,19 @@ async function loadWindowStatus() {
         if (data.open) {
             banner.classList.add('window-open');
             banner.classList.remove('window-closed');
-            statusText.textContent = 'Transfer window is OPEN';
+            statusText.textContent = 'Transfers will open on the 1st';
             subText.textContent = `You can transfer until the ${data.windowEndDay}th of this month. Minimum ₦${data.minTransfer.toLocaleString()}.`;
             if (transferBtn) transferBtn.disabled = false;
         } else {
-            banner.classList.add('window-closed');
-            banner.classList.remove('window-open');
-            statusText.textContent = 'Transfer window is CLOSED';
-            subText.textContent = `Next window opens on ${data.nextWindowLabel}.`;
-            if (transferBtn) {
-                transferBtn.disabled = true;
-                transferBtn.innerHTML = '<i class="fas fa-lock"></i> Transfers closed';
-            }
-        }
+    banner.classList.add('window-closed');
+    banner.classList.remove('window-open');
+    statusText.textContent = 'Transfers will open on the 1st';
+    subText.textContent = `We pay on the 1st–5th of every month. Next payday: ${data.nextWindowLabel}. Keep earning — your balance is safe.`;
+    if (transferBtn) {
+        transferBtn.disabled = true;
+        transferBtn.innerHTML = '<i class="fas fa-lock"></i> Opens on the 1st';
+    }
+}
     } catch {
         statusText.textContent = 'Could not verify transfer window';
         subText.textContent = 'Please refresh the page.';
@@ -340,3 +340,4 @@ function escapeHtml(str) {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 }
+
