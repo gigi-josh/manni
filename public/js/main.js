@@ -344,6 +344,7 @@ function renderTaskCard(task) {
             break;
 
         case 'started': {
+            // Video embed
             const activeVideo = activeVideos[task.id] || task.currentVideo;
             const videoHtml = (task.verification === 'video' && activeVideo)
                 ? `<div class="task-video">
@@ -353,20 +354,59 @@ function renderTaskCard(task) {
                    </div>`
                 : '';
 
-            const isTimed = task.verification === 'timed' || task.verification === 'video';
+            // Article block
+            const activeArticle = task.currentArticle;
+            const articleHtml = (task.verification === 'article' && activeArticle)
+                ? `<div class="task-article">
+                       <div class="task-article-header">
+                           <i class="fas fa-newspaper"></i>
+                           <span>${escapeHtml(activeArticle.title)}</span>
+                       </div>
+                       <a href="${escapeAttr(activeArticle.url)}"
+                          target="_blank"
+                          rel="noopener"
+                          class="btn btn-outline btn-full task-article-link">
+                           <i class="fas fa-external-link-alt"></i> Open Article
+                       </a>
+                       <small>Read it, then come back and click "I'm Done".</small>
+                   </div>`
+                : '';
+
+            // Survey block — takes user to /surveys?task=X
+            const surveyHtml = (task.verification === 'survey')
+                ? `<div class="task-survey">
+                       <div class="task-survey-header">
+                           <i class="fas fa-poll"></i>
+                           <span>Take a survey on CPX Research</span>
+                       </div>
+                       <a href="/surveys?task=${task.id}"
+                          class="btn btn-primary btn-full task-survey-link">
+                           <i class="fas fa-external-link-alt"></i> Open Survey Wall
+                       </a>
+                       <small>Complete a survey, then come back. Reward credits automatically.</small>
+                   </div>`
+                : '';
+
+            const isTimed = task.verification === 'timed'
+                || task.verification === 'video'
+                || task.verification === 'article';
             const disabledAttr = isTimed ? 'disabled' : '';
 
             actionHtml = `
                 ${videoHtml}
+                ${articleHtml}
+                ${surveyHtml}
                 ${isTimed ? `
                     <div class="task-timer" id="timer-${task.id}">
                         <span class="timer-label">Time on task:</span>
                         <span class="timer-value" data-task-id="${task.id}">0s</span>
                     </div>
                 ` : ''}
-                <button id="completeBtn-${task.id}" onclick="completeTask(${task.id})" class="btn btn-success" ${disabledAttr}>
-                    I'm Done
-                </button>
+                ${task.verification !== 'survey' ? `
+                    <button id="completeBtn-${task.id}" onclick="completeTask(${task.id})" class="btn btn-success" ${disabledAttr}>
+                        I'm Done
+                    </button>
+                ` : ''}
             `;
             break;
         }
@@ -381,7 +421,11 @@ function renderTaskCard(task) {
             ? `<span class="badge badge-timed">⏱ ${task.minSeconds}s min</span>`
             : task.verification === 'video'
                 ? `<span class="badge badge-video">▶ Video · ${task.minSeconds}s min</span>`
-                : '';
+                : task.verification === 'article'
+                    ? `<span class="badge badge-article">📖 Article · ${task.minSeconds}s min</span>`
+                    : task.verification === 'survey'
+                        ? `<span class="badge badge-survey">📊 Survey</span>`
+                        : '';
 
     const adLink = task.link ? `/ad/${task.id}?url=${encodeURIComponent(task.link)}` : '';
 
@@ -501,7 +545,9 @@ function startTimer(taskId, startedAt, minSeconds, verification) {
     const startMs = new Date(startedAt).getTime();
     if (isNaN(startMs)) return;
 
-    const isTimed = verification === 'timed' || verification === 'video';
+    const isTimed = verification === 'timed'
+        || verification === 'video'
+        || verification === 'article';
 
     const tick = () => {
         const elapsed = Math.floor((Date.now() - startMs) / 1000);
@@ -533,6 +579,7 @@ async function completeTask(taskId) {
 
     let proofUrl = null;
     let videoId = null;
+    let articleId = null;
 
     if (task.verification === 'proof' || task.verification === 'admin') {
         proofUrl = prompt(
@@ -551,7 +598,11 @@ async function completeTask(taskId) {
         videoId = v && v.id ? v.id : null;
     }
 
-    if (task.verification === 'timed' || task.verification === 'video') {
+    if (task.verification === 'article') {
+        articleId = task.currentArticle && task.currentArticle.id ? task.currentArticle.id : null;
+    }
+
+    if (task.verification === 'timed' || task.verification === 'video' || task.verification === 'article') {
         if (!confirm('Confirm you have completed this task?')) return;
     }
 
@@ -559,7 +610,7 @@ async function completeTask(taskId) {
         const res = await fetch('/api/tasks/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: user.id, taskId, proofUrl, videoId })
+            body: JSON.stringify({ userId: user.id, taskId, proofUrl, videoId, articleId })
         });
         const data = await res.json();
 
