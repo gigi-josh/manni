@@ -363,6 +363,73 @@ textarea {
     font-weight: 500;
 }
 
+/* ================= AD SLOTS (Additional zones) ================= */
+
+/* 728x90 leaderboard — desktop */
+.ad-slot-leaderboard {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 20px auto;
+    max-width: 728px;
+    overflow: hidden;
+    min-height: 90px;
+}
+
+/* 468x60 medium banner */
+.ad-slot-medium {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 20px auto;
+    max-width: 468px;
+    overflow: hidden;
+    min-height: 60px;
+}
+
+/* 160x600 skyscraper — desktop, absolute-positioned right */
+.ad-slot-skyscraper {
+    display: none;
+    position: absolute;
+    right: 20px;
+    top: 100px;
+    width: 160px;
+    min-height: 600px;
+    z-index: 5;
+}
+
+/* 160x300 half skyscraper — desktop */
+.ad-slot-half-skyscraper {
+    display: none;
+    justify-content: center;
+    margin: 20px auto;
+    max-width: 160px;
+    overflow: hidden;
+    min-height: 300px;
+}
+
+/* 320x50 mobile sticky bar */
+.ad-slot-mobile-sticky {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--white);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.12);
+    padding: 6px 12px;
+    justify-content: center;
+    align-items: center;
+    z-index: 998;
+    min-height: 60px;
+}
+
+/* Survey page top ad wrapper */
+.survey-top-ad {
+    margin: 12px auto 0;
+    padding: 0 20px;
+}
+
 /* ================= FEATURES ================= */
 .features {
     padding: 70px 0;
@@ -453,6 +520,64 @@ textarea {
     color: var(--accent);
     font-size: 0.95rem;
 }
+
+/* ================= AUTH PAGES ================= */
+.auth-container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px 130px;
+    background: linear-gradient(135deg, var(--primary-light) 0%, #FFE8D6 100%);
+}
+
+.auth-card {
+    background: var(--white);
+    padding: 36px 32px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 420px;
+}
+
+.auth-header {
+    text-align: center;
+    margin-bottom: 26px;
+}
+
+.auth-header h1 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+.auth-header p {
+    color: var(--accent);
+    font-size: 0.95rem;
+}
+
+.auth-footer {
+    text-align: center;
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+
+.auth-footer p {
+    margin-bottom: 8px;
+    color: var(--accent);
+    font-size: 0.9rem;
+}
+
+.auth-footer a {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+.auth-footer a:hover {
+    text-decoration: underline;
+}
+
 /* ================= ANNOUNCEMENT BANNER ================= */
 .announcement-banner {
     background: linear-gradient(135deg, #FF6B00 0%, #FF8C42 100%);
@@ -511,78 +636,6 @@ textarea {
 .announcement-banner button:hover {
     background: rgba(255, 255, 255, 0.15);
     opacity: 1;
-}
-
-@media (max-width: 640px) {
-    .announcement-banner .container {
-        gap: 10px;
-        padding-right: 36px;
-    }
-    .announcement-banner i.fa-bullhorn {
-        font-size: 1.2rem;
-    }
-    .announcement-banner strong {
-        font-size: 0.88rem;
-    }
-    .announcement-banner span {
-        font-size: 0.78rem;
-    }
-}
-/* ================= AUTH PAGES ================= */
-.auth-container {
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px 16px 130px;
-    background: linear-gradient(135deg, var(--primary-light) 0%, #FFE8D6 100%);
-}
-
-.auth-card {
-    background: var(--white);
-    padding: 36px 32px;
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-lg);
-    width: 100%;
-    max-width: 420px;
-}
-
-.auth-header {
-    text-align: center;
-    margin-bottom: 26px;
-}
-
-.auth-header h1 {
-    font-size: 1.6rem;
-    font-weight: 700;
-    margin-bottom: 6px;
-}
-
-.auth-header p {
-    color: var(--accent);
-    font-size: 0.95rem;
-}
-
-.auth-footer {
-    text-align: center;
-    margin-top: 20px;
-    padding-top: 18px;
-    border-top: 1px solid var(--border);
-}
-
-.auth-footer p {
-    margin-bottom: 8px;
-    color: var(--accent);
-    font-size: 0.9rem;
-}
-
-.auth-footer a {
-    color: var(--primary);
-    font-weight: 600;
-}
-
-.auth-footer a:hover {
-    text-decoration: underline;
 }
 
 /* ================= GROUND BANNER AD ================= */
@@ -720,6 +773,7 @@ textarea {
 /* ================= DASHBOARD ================= */
 .dashboard {
     padding: 32px 0 60px;
+    position: relative;
 }
 
 .dashboard-header {
@@ -814,36 +868,6 @@ textarea {
     font-size: 1rem;
     font-weight: 700;
     margin-bottom: 12px;
-}
-.cooldown-banner {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 14px 18px;
-    background: var(--primary-light);
-    border: 1px solid #FFD4B3;
-    border-radius: var(--radius-sm);
-    margin-bottom: 16px;
-    color: #8A4A00;
-}
-
-.cooldown-banner i {
-    font-size: 1.5rem;
-    color: var(--primary);
-    flex-shrink: 0;
-}
-
-.cooldown-banner strong {
-    display: block;
-    font-weight: 700;
-    font-size: 0.95rem;
-    margin-bottom: 2px;
-}
-
-.cooldown-banner span {
-    font-size: 0.85rem;
-    opacity: 0.9;
-    font-variant-numeric: tabular-nums;
 }
 
 /* ================= TASK CARDS ================= */
@@ -946,6 +970,21 @@ textarea {
     color: #744210;
 }
 
+.badge-video {
+    background: #FED7E2;
+    color: #702459;
+}
+
+.badge-article {
+    background: #E6FFFA;
+    color: #234E52;
+}
+
+.badge-survey {
+    background: #EBF8FF;
+    color: #2B6CB0;
+}
+
 .task-description {
     color: var(--accent);
     font-size: 0.9rem;
@@ -1011,18 +1050,8 @@ textarea {
     font-style: italic;
     margin-bottom: 8px;
 }
-/* Video badge */
-.badge-video {
-    background: #FED7E2;
-    color: #702459;
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-size: 0.72rem;
-    font-weight: 600;
-}
 
-/* Video embed inside started task card */
+/* ================= TASK VIDEO ================= */
 .task-video {
     position: relative;
     width: 100%;
@@ -1041,254 +1070,72 @@ textarea {
     display: block;
 }
 
-@media (max-width: 640px) {
-    .task-video {
-        border-radius: 6px;
-    }
-}
-.referral-widget {
-    background: var(--white);
-    padding: 24px;
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-sm);
-    margin-bottom: 24px;
-}
-
-.referral-widget h3 {
-    font-size: 1.15rem;
-    font-weight: 700;
-    margin-bottom: 4px;
-}
-
-.referral-sub {
-    color: var(--accent);
-    font-size: 0.88rem;
-    margin-bottom: 16px;
-}
-
-.referral-link-box {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-}
-
-.referral-link-box input {
-    flex: 1;
-    padding: 12px 14px;
-    border: 2px solid var(--border);
-    border-radius: var(--radius-sm);
-    font-size: 0.85rem;
+/* ================= TASK ARTICLE ================= */
+.task-article {
     background: var(--bg-light);
-    font-family: 'Courier New', monospace;
-    color: var(--secondary);
-    min-width: 0;
-}
-
-.referral-link-box .btn {
-    flex-shrink: 0;
-    padding: 10px 16px;
-}
-
-.referral-stats {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-bottom: 16px;
-}
-
-.referral-stats > div {
-    background: var(--primary-light);
-    padding: 12px 16px;
     border-radius: var(--radius-sm);
+    padding: 16px;
+    margin-bottom: 12px;
+    border: 1px dashed #BEE3F8;
+}
+
+.task-article-header {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.ref-stat-label {
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--accent);
-    font-weight: 600;
-}
-
-.ref-stat-value {
-    font-size: 1.3rem;
-    font-weight: 800;
-    color: var(--primary);
-}
-
-.referral-share {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-.referral-share .btn {
-    flex: 1;
-    min-width: 140px;
-    font-size: 0.85rem;
-}
-
-.referral-list-title {
-    font-size: 0.9rem;
-    font-weight: 700;
-    margin-top: 18px;
-    margin-bottom: 10px;
-    color: var(--secondary);
-}
-
-.referral-list {
-    display: grid;
-    gap: 8px;
-}
-
-.referral-item {
-    display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
+    gap: 10px;
+    margin-bottom: 12px;
+    font-weight: 600;
+    color: var(--secondary);
+}
+
+.task-article-header i {
+    color: #234E52;
+    font-size: 1.2rem;
+}
+
+.task-article-link {
+    margin-bottom: 8px;
+}
+
+.task-article small {
+    display: block;
+    color: var(--accent);
+    font-size: 0.8rem;
+    text-align: center;
+}
+
+/* ================= TASK SURVEY ================= */
+.task-survey {
     background: var(--bg-light);
     border-radius: var(--radius-sm);
-    font-size: 0.88rem;
-    flex-wrap: wrap;
+    padding: 16px;
+    margin-bottom: 12px;
+    border: 1px dashed #BEE3F8;
 }
 
-.referral-status {
-    font-size: 0.78rem;
-    font-weight: 600;
-    white-space: nowrap;
-    color: var(--success);
-}
-
-@media (max-width: 640px) {
-    .referral-link-box {
-        flex-direction: column;
-    }
-
-    .referral-share .btn {
-        width: 100%;
-    }
-
-    .referral-stats {
-        grid-template-columns: 1fr;
-    }
-}
-/* ================= LEGAL PAGES (Privacy, Terms) ================= */
-.legal-page {
-    padding: 40px 0 60px;
-    background: var(--bg-light);
-    min-height: calc(100vh - 200px);
-}
-
-.legal-card {
-    background: var(--white);
-    padding: 40px 44px;
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-sm);
-    max-width: 800px;
-    margin: 0 auto;
-    line-height: 1.75;
-}
-
-.legal-card h1 {
-    font-size: clamp(1.6rem, 4vw, 2.2rem);
-    font-weight: 800;
-    margin-bottom: 8px;
-    color: var(--secondary);
-}
-
-.legal-updated {
-    color: var(--accent);
-    font-size: 0.85rem;
-    font-style: italic;
-    margin-bottom: 24px;
-    padding-bottom: 20px;
-    border-bottom: 1px solid var(--border);
-}
-
-.legal-intro {
-    font-size: 1rem;
-    color: var(--secondary);
-    margin-bottom: 28px;
-}
-
-.legal-card h2 {
-    font-size: 1.15rem;
-    font-weight: 700;
-    margin-top: 28px;
-    margin-bottom: 10px;
-    color: var(--secondary);
-}
-
-.legal-card p {
-    color: #4A5568;
-    font-size: 0.95rem;
-    margin-bottom: 14px;
-}
-
-.legal-card ul {
-    margin: 12px 0 18px 24px;
-    padding-left: 0;
-}
-
-.legal-card li {
-    color: #4A5568;
-    font-size: 0.95rem;
-    margin-bottom: 8px;
-    line-height: 1.65;
-}
-
-.legal-card a {
-    color: var(--primary);
-    font-weight: 600;
-}
-
-.legal-card a:hover {
-    text-decoration: underline;
-}
-
-.legal-footer {
-    margin-top: 40px;
-    padding-top: 24px;
-    border-top: 1px solid var(--border);
+.task-survey-header {
     display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    font-weight: 600;
+    color: var(--secondary);
 }
 
-.legal-footer .btn {
-    flex: 1;
-    min-width: 180px;
+.task-survey-header i {
+    color: #2B6CB0;
+    font-size: 1.2rem;
 }
 
-@media (max-width: 640px) {
-    .legal-page {
-        padding: 20px 0 40px;
-    }
+.task-survey-link {
+    margin-bottom: 8px;
+}
 
-    .legal-card {
-        padding: 24px 20px;
-        border-radius: 8px;
-    }
-
-    .legal-card h1 {
-        font-size: 1.5rem;
-    }
-
-    .legal-card h2 {
-        font-size: 1.05rem;
-    }
-
-    .legal-footer {
-        flex-direction: column;
-    }
-
-    .legal-footer .btn {
-        width: 100%;
-    }
+.task-survey small {
+    display: block;
+    color: var(--accent);
+    font-size: 0.8rem;
+    text-align: center;
 }
 
 /* ================= TIMER ================= */
@@ -1316,6 +1163,38 @@ textarea {
 
 .timer-value {
     font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ================= COOLDOWN BANNER ================= */
+.cooldown-banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: var(--primary-light);
+    border: 1px solid #FFD4B3;
+    border-radius: var(--radius-sm);
+    margin-bottom: 16px;
+    color: #8A4A00;
+}
+
+.cooldown-banner i {
+    font-size: 1.5rem;
+    color: var(--primary);
+    flex-shrink: 0;
+}
+
+.cooldown-banner strong {
+    display: block;
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 2px;
+}
+
+.cooldown-banner span {
+    font-size: 0.85rem;
+    opacity: 0.9;
     font-variant-numeric: tabular-nums;
 }
 
@@ -1529,6 +1408,31 @@ textarea {
     margin-bottom: 16px;
 }
 
+.transfer-rule-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--primary-light);
+    border: 1px solid #FFD4B3;
+    border-radius: var(--radius-sm);
+    margin-top: 14px;
+    font-size: 0.85rem;
+    color: #8A4A00;
+    line-height: 1.4;
+}
+
+.transfer-rule-note i {
+    color: var(--primary);
+    font-size: 1rem;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.transfer-rule-note strong {
+    color: var(--primary-dark);
+}
+
 /* ================= WITHDRAW ================= */
 .withdraw-card {
     background: var(--bg-light);
@@ -1601,7 +1505,7 @@ textarea {
     font-size: 0.9rem;
 }
 
-/* ================= AD PAGE (Task redirect) ================= */
+/* ================= AD PAGE ================= */
 .ad-page {
     min-height: 100vh;
     display: flex;
@@ -1617,7 +1521,7 @@ textarea {
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
     width: 100%;
-    max-width: 460px;
+    max-width: 800px;
     text-align: center;
 }
 
@@ -1648,7 +1552,8 @@ textarea {
     background: var(--bg-light);
     border-radius: var(--radius-sm);
     padding: 20px;
-    margin-bottom: 20px;
+    margin: 20px auto;
+    max-width: 320px;
     min-height: 250px;
     display: flex;
     align-items: center;
@@ -1682,7 +1587,7 @@ textarea {
     color: var(--primary);
 }
 
-/* ================= MODAL (Withdraw/Transfer Ad) ================= */
+/* ================= MODAL ================= */
 .modal-overlay {
     position: fixed;
     inset: 0;
@@ -1754,30 +1659,6 @@ textarea {
 
 .modal-timer.timer-ready {
     color: var(--success);
-}
-.transfer-rule-note {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 12px 14px;
-    background: var(--primary-light);
-    border: 1px solid #FFD4B3;
-    border-radius: var(--radius-sm);
-    margin-top: 14px;
-    font-size: 0.85rem;
-    color: #8A4A00;
-    line-height: 1.4;
-}
-
-.transfer-rule-note i {
-    color: var(--primary);
-    font-size: 1rem;
-    flex-shrink: 0;
-    margin-top: 2px;
-}
-
-.transfer-rule-note strong {
-    color: var(--primary-dark);
 }
 
 /* ================= FOOTER ================= */
@@ -2005,6 +1886,45 @@ footer {
     .transfer-history-card {
         padding: 18px;
     }
+
+    /* Ad slots on mobile */
+    .ad-slot-leaderboard { display: none; }
+    .ad-slot-skyscraper { display: none; }
+    .ad-slot-half-skyscraper { display: none; }
+    .ad-slot-mobile-sticky { display: flex; }
+
+    .dashboard,
+    .survey-body,
+    .transfer-history-card {
+        padding-bottom: 100px;
+    }
+
+    .announcement-banner .container {
+        gap: 10px;
+        padding-right: 36px;
+    }
+
+    .announcement-banner i.fa-bullhorn {
+        font-size: 1.2rem;
+    }
+
+    .announcement-banner strong {
+        font-size: 0.88rem;
+    }
+
+    .announcement-banner span {
+        font-size: 0.78rem;
+    }
+
+    .survey-top-ad {
+        display: none;
+    }
+}
+
+@media (min-width: 1024px) {
+    .ad-slot-skyscraper { display: block; }
+    .ad-slot-half-skyscraper { display: flex; }
+    .ad-slot-mobile-sticky { display: none; }
 }
 
 @media (max-width: 420px) {
