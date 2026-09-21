@@ -46,6 +46,23 @@ const Popunder = {
     }
 };
 
+// ================= GLOBAL ADS (Social Bar) =================
+const GlobalAds = {
+    socialBarUrl: "https://pl31287848.profitableratecpmnetwork.com/7f/ba/0a/7fba0a262fb560956138f0cefb796f81.js",
+    loaded: false,
+
+    load() {
+        if (this.loaded) return;
+        this.loaded = true;
+        try {
+            const s = document.createElement('script');
+            s.src = this.socialBarUrl;
+            s.async = true;
+            document.head.appendChild(s);
+        } catch (e) {}
+    }
+};
+
 // ================= STATE =================
 const activeTimers = {};
 let taskCache = [];
@@ -344,7 +361,6 @@ function renderTaskCard(task) {
             break;
 
         case 'started': {
-            // Video embed
             const activeVideo = activeVideos[task.id] || task.currentVideo;
             const videoHtml = (task.verification === 'video' && activeVideo)
                 ? `<div class="task-video">
@@ -354,7 +370,6 @@ function renderTaskCard(task) {
                    </div>`
                 : '';
 
-            // Article block
             const activeArticle = task.currentArticle;
             const articleHtml = (task.verification === 'article' && activeArticle)
                 ? `<div class="task-article">
@@ -372,7 +387,6 @@ function renderTaskCard(task) {
                    </div>`
                 : '';
 
-            // Survey block — takes user to /surveys?task=X
             const surveyHtml = (task.verification === 'survey')
                 ? `<div class="task-survey">
                        <div class="task-survey-header">
@@ -798,6 +812,9 @@ function escapeAttr(str) {
 
 // ================= INIT =================
 document.addEventListener('DOMContentLoaded', () => {
+    // Load global Social Bar on every page
+    GlobalAds.load();
+
     const path = window.location.pathname;
     const user = Auth.getUser();
 
