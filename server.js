@@ -149,6 +149,22 @@ async function pickRandomVideoForUser(userId) {
     return any.rows[0] || null;
 }
 
+async function pickRandomArticleForUser(userId) {
+    const unused = await pool.query(
+        `SELECT * FROM articles
+         WHERE active = TRUE
+           AND id NOT IN (SELECT article_id FROM user_articles WHERE user_id = $1)
+         ORDER BY RANDOM() LIMIT 1`,
+        [userId]
+    );
+    if (unused.rows.length) return unused.rows[0];
+
+    const any = await pool.query(
+        `SELECT * FROM articles WHERE active = TRUE ORDER BY RANDOM() LIMIT 1`
+    );
+    return any.rows[0] || null;
+}
+
 function computeEffectiveStatus(task, progress) {
     if (!progress) return 'available';
     const baseStatus = progress.status;
@@ -181,30 +197,24 @@ async function flwRequest(endpoint, method = 'GET', body = null) {
     if (body) options.body = JSON.stringify(body);
 
     const res = await fetch(`${FLW_BASE}${endpoint}`, options);
-    const data = await res.json();
+    const text = await res.text();
+
+    let data;
+    try {
+        data = JSON.parse(text);
+    } catch (parseErr) {
+        console.error(`Flutterwave returned non-JSON (HTTP ${res.status}):`, text.slice(0, 500));
+        throw new Error(`Flutterwave API error (HTTP ${res.status}): ${text.slice(0, 200)}`);
+    }
 
     if (!res.ok) {
         console.error('Flutterwave error:', data);
-        throw new Error(data.message || 'Flutterwave request failed');
+        throw new Error(data.message || `Flutterwave error (HTTP ${res.status})`);
     }
     return data;
 }
 
-// Initiate a transfer to a bank account
 async function flwInitiateTransfer({ accountBank, accountNumber, amountNaira, narration, reference }) {
-    // 1. Create recipient (or reuse if we already stored one)
-    // We'll create fresh each time — Flutterwave dedupes internally.
-    const recipientRes = await flwRequest('/transfers/recipients', 'POST', {
-        type: 'nuban',
-        name: 'MannieNG User',
-        account_number: accountNumber,
-        bank_code: accountBank,
-        currency: 'NGN'
-    });
-
-    const recipientId = recipientRes.data.id;
-
-    // 2. Initiate transfer
     const transferRes = await flwRequest('/transfers', 'POST', {
         account_bank: accountBank,
         account_number: accountNumber,
@@ -214,7 +224,6 @@ async function flwInitiateTransfer({ accountBank, accountNumber, amountNaira, na
         reference: reference,
         debit_currency: 'NGN'
     });
-
     return transferRes.data;
 }
 
@@ -265,6 +274,16 @@ async function initDb() {
                 created_at TIMESTAMP DEFAULT NOW()
             );
 
+            CREATE TABLE IF NOT EXISTS articles (
+                id SERIAL PRIMARY KEY,
+                title VARCHAR(200) NOT NULL,
+                url TEXT NOT NULL,
+                reward INTEGER DEFAULT 109,
+                min_seconds INTEGER DEFAULT 90,
+                active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT NOW()
+            );
+
             CREATE TABLE IF NOT EXISTS user_videos (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -272,6 +291,15 @@ async function initDb() {
                 task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
                 watched_at TIMESTAMP DEFAULT NOW(),
                 UNIQUE(user_id, video_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS user_articles (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                article_id INTEGER REFERENCES articles(id) ON DELETE CASCADE,
+                task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+                read_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(user_id, article_id)
             );
 
             CREATE TABLE IF NOT EXISTS task_progress (
@@ -284,6 +312,7 @@ async function initDb() {
                 proof_url TEXT,
                 admin_note TEXT,
                 current_video_id INTEGER REFERENCES videos(id),
+                current_article_id INTEGER REFERENCES articles(id),
                 UNIQUE(user_id, task_id)
             );
 
@@ -333,31 +362,35 @@ async function initDb() {
             CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code);
             CREATE INDEX IF NOT EXISTS idx_users_referred_by ON users(referred_by);
             CREATE INDEX IF NOT EXISTS idx_user_videos_user ON user_videos(user_id);
+            CREATE INDEX IF NOT EXISTS idx_user_articles_user ON user_articles(user_id);
+            CREATE INDEX IF NOT EXISTS idx_articles_active ON articles(active);
+            CREATE INDEX IF NOT EXISTS idx_task_progress_article ON task_progress(current_article_id);
         `);
-        
-        // Safe migrations (idempotent — safe to run every startup)
-const migrations = [
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`,
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_count INTEGER DEFAULT 0`,
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_task_date DATE`,
-    `ALTER TABLE users ALTER COLUMN email DROP NOT NULL`,
-    `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS repeatable BOOLEAN DEFAULT FALSE`,
-    `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS renew_after_days INTEGER`,
-    `ALTER TABLE task_progress ADD COLUMN IF NOT EXISTS current_video_id INTEGER`,
-    `ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS bank_code VARCHAR(10)`,
-    `ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS flw_reference VARCHAR(100)`,
-    `ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS flw_transfer_id VARCHAR(100)`
-];
 
-for (const sql of migrations) {
-    try {
-        await pool.query(sql);
-    } catch (err) {
-        if (!err.message.includes('already exists') && !err.message.includes('does not exist')) {
-            console.warn('Migration warning:', err.message);
+        // Safe migrations (plain ALTER TABLE, idempotent)
+        const migrations = [
+            `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`,
+            `ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_count INTEGER DEFAULT 0`,
+            `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_task_date DATE`,
+            `ALTER TABLE users ALTER COLUMN email DROP NOT NULL`,
+            `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS repeatable BOOLEAN DEFAULT FALSE`,
+            `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS renew_after_days INTEGER`,
+            `ALTER TABLE task_progress ADD COLUMN IF NOT EXISTS current_video_id INTEGER`,
+            `ALTER TABLE task_progress ADD COLUMN IF NOT EXISTS current_article_id INTEGER`,
+            `ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS bank_code VARCHAR(10)`,
+            `ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS flw_reference VARCHAR(100)`,
+            `ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS flw_transfer_id VARCHAR(100)`
+        ];
+
+        for (const sql of migrations) {
+            try {
+                await pool.query(sql);
+            } catch (err) {
+                if (!err.message.includes('already exists') && !err.message.includes('does not exist')) {
+                    console.warn('Migration warning:', err.message);
+                }
+            }
         }
-    }
-}
 
         // Renewal rules
         await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Watch Video'`);
@@ -366,9 +399,13 @@ for (const sql of migrations) {
         await pool.query(`UPDATE tasks SET repeatable = FALSE, renew_after_days = 3    WHERE title = 'Complete Survey'`);
         await pool.query(`UPDATE tasks SET repeatable = FALSE, renew_after_days = NULL WHERE title = 'Download App'`);
 
+        // Convert Read Article to 'article' verification
+        await pool.query(`UPDATE tasks SET verification = 'article', link = NULL WHERE title = 'Read Article'`);
+
+        // Reset completed tasks if applicable
         await pool.query(`
             UPDATE task_progress tp
-            SET status = 'available', started_at = NULL, current_video_id = NULL
+            SET status = 'available', started_at = NULL, current_video_id = NULL, current_article_id = NULL
             FROM tasks t
             WHERE tp.task_id = t.id
               AND tp.status = 'completed'
@@ -389,7 +426,7 @@ for (const sql of migrations) {
                 ('Complete Survey', 'Share your opinion about fintech in Nigeria', 100, 'Survey', 'https://survey.example.com', 'Answer all questions, then submit a screenshot link', 'proof', 60, FALSE, 3),
                 ('Download App', 'Download and install a Nigerian shopping app', 150, 'Download', 'https://play.google.com/store/apps/details?id=example', 'Install, open the app, and submit a screenshot link', 'proof', 60, FALSE, NULL),
                 ('Social Media Post', 'Post about MannieNG on Instagram or Twitter', 75, 'Social', NULL, 'Post using #MannieNG and tag @MannieNG, then submit the post URL', 'proof', 0, TRUE, NULL),
-                ('Read Article', 'Read a short article and answer 3 quick questions', 109, 'Article', 'https://example.com/article', 'Read the article carefully, then click "I''m Done"', 'timed', 90, TRUE, NULL)
+                ('Read Article', 'Read a short article and answer 3 quick questions', 109, 'Article', NULL, 'Read the article carefully, then click "I''m Done"', 'article', 90, TRUE, NULL)
             `);
             console.log('✅ Seeded default tasks');
         }
@@ -403,13 +440,24 @@ for (const sql of migrations) {
                 ('https://www.youtube.com/embed/9bZkp7q19f0', 'Fintech in Africa'),
                 ('https://www.youtube.com/embed/kJQP7kiw5Fk', 'Naija Music Hit'),
                 ('https://www.youtube.com/embed/3JZ_D3ELwOQ', 'Lagos City Tour'),
-                ('https://www.youtube.com/embed/h7m5jjJ9mM', 'Nigerian Food Recipes')
+                ('https://www.youtube.com/embed/hY7m5jjJ9mM', 'Nigerian Food Recipes')
             `);
             console.log('✅ Seeded default videos');
         }
 
+        // Seed articles (2 starter articles)
+        const art = await pool.query('SELECT COUNT(*)::int AS count FROM articles');
+        if (art.rows[0].count === 0) {
+            await pool.query(`
+                INSERT INTO articles (title, url, reward, min_seconds) VALUES
+                ('How to Save Money as a Nigerian Student', 'https://www.investopedia.com/articles/personal-finance/100516/best-ways-college-students-can-save-money.asp', 109, 90),
+                ('Beginner''s Guide to Freelancing in Nigeria', 'https://www.fiverr.com/resources/guides/getting-started-freelancing', 109, 90)
+            `);
+            console.log('✅ Seeded default articles');
+        }
+
         console.log('✅ Database tables ready');
-        console.log(`Flutterwave mode: ${process.env.FLW_SECRET_KEY?.startsWith('FLWSECK_TEST') ? 'TEST' : 'LIVE'}`);
+        console.log(`Flutterwave mode: ${process.env.FLW_SECRET_KEY?.startsWith('FLWSECK_TEST') ? 'TEST' : process.env.FLW_SECRET_KEY ? 'LIVE' : 'NOT CONFIGURED'}`);
     } catch (err) {
         console.error('❌ DB init failed:', err.message);
         throw err;
@@ -588,6 +636,7 @@ app.get('/api/tasks/:userId', async (req, res) => {
         const progressMap = {};
         progressRows.forEach(p => { progressMap[p.task_id] = p; });
 
+        // Load current videos for started tasks
         const videoIds = progressRows.filter(p => p.current_video_id).map(p => p.current_video_id);
         let videoMap = {};
         if (videoIds.length) {
@@ -597,9 +646,20 @@ app.get('/api/tasks/:userId', async (req, res) => {
             vids.forEach(v => { videoMap[v.id] = v; });
         }
 
+        // Load current articles for started tasks
+        const articleIds = progressRows.filter(p => p.current_article_id).map(p => p.current_article_id);
+        let articleMap = {};
+        if (articleIds.length) {
+            const { rows: arts } = await pool.query(
+                `SELECT id, url, title FROM articles WHERE id = ANY($1::int[])`, [articleIds]
+            );
+            arts.forEach(a => { articleMap[a.id] = a; });
+        }
+
         const tasksWithStatus = taskRows.map(task => {
             const p = progressMap[task.id];
             const currentVideo = p && p.current_video_id ? videoMap[p.current_video_id] : null;
+            const currentArticle = p && p.current_article_id ? articleMap[p.current_article_id] : null;
             const effectiveStatus = computeEffectiveStatus(task, p);
 
             let renewsOn = null;
@@ -627,6 +687,9 @@ app.get('/api/tasks/:userId', async (req, res) => {
                 adminNote: p ? p.admin_note : null,
                 currentVideo: currentVideo
                     ? { id: currentVideo.id, url: currentVideo.url, title: currentVideo.title }
+                    : null,
+                currentArticle: currentArticle
+                    ? { id: currentArticle.id, url: currentArticle.url, title: currentArticle.title }
                     : null
             };
         });
@@ -689,14 +752,21 @@ app.post('/api/tasks/start', async (req, res) => {
                 const vRes = await pool.query('SELECT id, url, title FROM videos WHERE id = $1', [progress.current_video_id]);
                 existingVideo = vRes.rows[0] || null;
             }
+            let existingArticle = null;
+            if (progress.current_article_id) {
+                const aRes = await pool.query('SELECT id, url, title FROM articles WHERE id = $1', [progress.current_article_id]);
+                existingArticle = aRes.rows[0] || null;
+            }
             return res.json({
                 message: 'Task already started',
                 startedAt: progress.started_at,
                 minSeconds: task.min_seconds,
-                video: existingVideo
+                video: existingVideo,
+                article: existingArticle
             });
         }
 
+        // Pick a video for video tasks
         let video = null;
         if (task.verification === 'video') {
             video = await pickRandomVideoForUser(userId);
@@ -705,18 +775,32 @@ app.post('/api/tasks/start', async (req, res) => {
             }
         }
 
+        // Pick an article for article tasks
+        let article = null;
+        if (task.verification === 'article') {
+            article = await pickRandomArticleForUser(userId);
+            if (!article) {
+                return res.status(503).json({ error: 'No articles available right now. Try again later.' });
+            }
+        }
+
         const update = await pool.query(
             `UPDATE task_progress
-             SET status = 'started', started_at = NOW(), current_video_id = $1
-             WHERE user_id = $2 AND task_id = $3 RETURNING *`,
-            [video ? video.id : null, userId, taskId]
+             SET status = 'started',
+                 started_at = NOW(),
+                 current_video_id = $1,
+                 current_article_id = $2
+             WHERE user_id = $3 AND task_id = $4
+             RETURNING *`,
+            [video ? video.id : null, article ? article.id : null, userId, taskId]
         );
 
         res.json({
             message: 'Task started',
             startedAt: update.rows[0].started_at,
             minSeconds: task.min_seconds,
-            video: video ? { id: video.id, url: video.url, title: video.title } : null
+            video: video ? { id: video.id, url: video.url, title: video.title } : null,
+            article: article ? { id: article.id, url: article.url, title: article.title } : null
         });
     } catch (err) {
         console.error('Task start error:', err);
@@ -725,7 +809,7 @@ app.post('/api/tasks/start', async (req, res) => {
 });
 
 app.post('/api/tasks/complete', async (req, res) => {
-    const { userId, taskId, proofUrl, videoId } = req.body;
+    const { userId, taskId, proofUrl, videoId, articleId } = req.body;
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -770,6 +854,7 @@ app.post('/api/tasks/complete', async (req, res) => {
             }
         }
 
+        // ---- Resolve video for video tasks ----
         let usedVideoId = null;
         if (task.verification === 'video') {
             let vid = null;
@@ -802,14 +887,47 @@ app.post('/api/tasks/complete', async (req, res) => {
             );
         }
 
-        // Proof → pending
+        // ---- Resolve article for article tasks ----
+        let usedArticleId = null;
+        if (task.verification === 'article') {
+            let aid = null;
+            if (articleId) {
+                const check = await client.query('SELECT id FROM articles WHERE id = $1 AND active = TRUE', [articleId]);
+                if (check.rows.length) aid = check.rows[0].id;
+            }
+            if (!aid && progress.current_article_id) aid = progress.current_article_id;
+            if (!aid) {
+                const fallback = await client.query(
+                    `SELECT id FROM articles WHERE active = TRUE AND id NOT IN (SELECT article_id FROM user_articles WHERE user_id = $1) ORDER BY RANDOM() LIMIT 1`,
+                    [userId]
+                );
+                if (fallback.rows.length) aid = fallback.rows[0].id;
+            }
+            if (!aid) {
+                const any = await client.query(`SELECT id FROM articles WHERE active = TRUE ORDER BY RANDOM() LIMIT 1`);
+                if (any.rows.length) aid = any.rows[0].id;
+            }
+            if (!aid) {
+                await client.query('ROLLBACK');
+                return res.status(503).json({ error: 'No articles available. Try again later.' });
+            }
+            usedArticleId = aid;
+            await client.query(
+                `INSERT INTO user_articles (user_id, article_id, task_id)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (user_id, article_id) DO NOTHING`,
+                [userId, aid, taskId]
+            );
+        }
+
+        // ---- Proof tasks → pending ----
         if (task.verification === 'proof' || task.verification === 'admin') {
             if (!proofUrl || typeof proofUrl !== 'string' || proofUrl.trim().length < 10) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ error: 'Please provide proof to submit this task' });
             }
             await client.query(
-                `UPDATE task_progress SET status = 'pending', proof_url = $1, completed_at = NOW(), current_video_id = NULL
+                `UPDATE task_progress SET status = 'pending', proof_url = $1, completed_at = NOW(), current_video_id = NULL, current_article_id = NULL
                  WHERE user_id = $2 AND task_id = $3`,
                 [proofUrl.trim(), userId, taskId]
             );
@@ -821,13 +939,13 @@ app.post('/api/tasks/complete', async (req, res) => {
             });
         }
 
-        // Success path (timed/video)
+        // ---- Success path (timed / video / article) ----
         await client.query(
             `INSERT INTO task_completions (user_id, task_id, reward, video_id) VALUES ($1, $2, $3, $4)`,
             [userId, taskId, task.reward, usedVideoId]
         );
 
-        // Streak update
+        // Streak
         const today = nigeriaDateString(0);
         const yesterday = nigeriaDateString(-1);
         const lastDate = user.last_task_date
@@ -860,13 +978,22 @@ app.post('/api/tasks/complete', async (req, res) => {
         // Progress reset
         if (task.repeatable) {
             await client.query(
-                `UPDATE task_progress SET status = 'available', started_at = NULL, completed_at = NOW(), current_video_id = NULL
+                `UPDATE task_progress
+                 SET status = 'available',
+                     started_at = NULL,
+                     completed_at = NOW(),
+                     current_video_id = NULL,
+                     current_article_id = NULL
                  WHERE user_id = $1 AND task_id = $2`,
                 [userId, taskId]
             );
         } else {
             await client.query(
-                `UPDATE task_progress SET status = 'completed', completed_at = NOW(), current_video_id = NULL
+                `UPDATE task_progress
+                 SET status = 'completed',
+                     completed_at = NOW(),
+                     current_video_id = NULL,
+                     current_article_id = NULL
                  WHERE user_id = $1 AND task_id = $2`,
                 [userId, taskId]
             );
@@ -966,10 +1093,9 @@ app.post('/api/withdraw', async (req, res) => {
         if (!bankName || !bankCode) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Bank selection required' }); }
         if (!/^\d{10}$/.test(accountNumber)) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Account number must be 10 digits' }); }
 
-        // Deduct balance first (reservation)
+        // Reserve balance
         await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [amt, userId]);
 
-        // Create pending withdrawal record
         const reference = `MNG-TRF-${userId}-${Date.now()}`;
         const ins = await client.query(
             `INSERT INTO withdrawals (user_id, amount, bank_name, bank_code, account_number, status, flw_reference)
@@ -982,8 +1108,7 @@ app.post('/api/withdraw', async (req, res) => {
 
         await client.query('COMMIT');
 
-        // ---- Now try to send via Flutterwave (outside the transaction) ----
-        // If Flutterwave fails, we refund and mark the withdrawal as failed.
+        // ---- Flutterwave call (outside transaction) ----
         try {
             const result = await flwInitiateTransfer({
                 accountBank: bankCode,
@@ -1009,7 +1134,6 @@ app.post('/api/withdraw', async (req, res) => {
                 reference
             });
         } catch (flwErr) {
-            // Refund user & mark failed
             console.error('Flutterwave transfer failed:', flwErr.message);
             await pool.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [amt, userId]);
             await pool.query(
@@ -1048,9 +1172,7 @@ app.get('/api/withdrawals/:userId', async (req, res) => {
     } catch { res.status(500).json({ error: 'Failed to load history' }); }
 });
 
-// ---- Flutterwave webhook (transfer.completed / failed) ----
 app.post('/api/flw-webhook', async (req, res) => {
-    // Verify signature
     const signature = req.headers['verif-hash'];
     if (!signature || signature !== process.env.FLW_WEBHOOK_HASH) {
         return res.status(401).json({ error: 'Invalid signature' });
@@ -1088,14 +1210,12 @@ app.post('/api/flw-webhook', async (req, res) => {
     res.json({ ok: true });
 });
 
-// ---- List Nigerian banks (for the frontend dropdown) ----
 app.get('/api/banks', async (req, res) => {
     try {
         const data = await flwRequest('/banks/NG');
         res.json(data.data || []);
     } catch (err) {
         console.error('Banks error:', err);
-        // Fallback list of popular Nigerian banks
         res.json([
             { code: '058', name: 'GTBank' },
             { code: '044', name: 'Access Bank' },
@@ -1343,6 +1463,59 @@ app.delete('/api/admin/panel/videos/:id', requireAdmin, async (req, res) => {
     } catch { res.status(500).json({ error: 'Failed to delete video' }); }
 });
 
+// ==================== ADMIN: ARTICLES ====================
+
+app.get('/api/admin/panel/articles', requireAdmin, async (req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT * FROM articles ORDER BY id DESC');
+        res.json(rows);
+    } catch { res.status(500).json({ error: 'Failed to load articles' }); }
+});
+
+app.post('/api/admin/panel/articles', requireAdmin, async (req, res) => {
+    const { title, url, reward, min_seconds } = req.body;
+    if (!title || !url) return res.status(400).json({ error: 'Title and URL required' });
+    try {
+        const { rows } = await pool.query(
+            `INSERT INTO articles (title, url, reward, min_seconds)
+             VALUES ($1, $2, $3, $4) RETURNING *`,
+            [title, url, reward || 109, min_seconds || 90]
+        );
+        res.json(rows[0]);
+    } catch { res.status(500).json({ error: 'Failed to add article' }); }
+});
+
+app.patch('/api/admin/panel/articles/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const allowed = ['title', 'url', 'reward', 'min_seconds', 'active'];
+    const fields = [];
+    const values = [];
+    let i = 1;
+    for (const key of allowed) {
+        if (req.body[key] !== undefined) {
+            fields.push(`${key} = $${i++}`);
+            values.push(req.body[key]);
+        }
+    }
+    if (!fields.length) return res.status(400).json({ error: 'No fields' });
+    values.push(id);
+    try {
+        const { rows } = await pool.query(
+            `UPDATE articles SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`,
+            values
+        );
+        if (!rows.length) return res.status(404).json({ error: 'Not found' });
+        res.json(rows[0]);
+    } catch { res.status(500).json({ error: 'Update failed' }); }
+});
+
+app.delete('/api/admin/panel/articles/:id', requireAdmin, async (req, res) => {
+    try {
+        await pool.query('DELETE FROM articles WHERE id = $1', [req.params.id]);
+        res.json({ ok: true });
+    } catch { res.status(500).json({ error: 'Delete failed' }); }
+});
+
 app.get('/api/admin/panel/completions', requireAdmin, async (req, res) => {
     try {
         const { rows } = await pool.query(
@@ -1470,7 +1643,69 @@ app.get('/api/admin/users', async (req, res) => {
     } catch { res.status(500).json({ error: 'Failed to load users' }); }
 });
 
-// Admin: manual retry of a stuck transfer
+app.post('/api/admin/transfer', async (req, res) => {
+    const { adminKey, adminPassword, transferId, status, note } = req.body;
+    const okKey = adminKey === process.env.ADMIN_KEY;
+    const okPw = adminPassword && adminPassword === process.env.DATABASE_PASSWORD;
+    if (!okKey && !okPw) return res.status(403).json({ error: 'Forbidden' });
+    if (!['processing', 'paid', 'failed'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const tRes = await client.query('SELECT * FROM withdrawals WHERE id = $1', [transferId]);
+        const transfer = tRes.rows[0];
+        if (!transfer) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Transfer not found' }); }
+
+        await client.query(
+            `UPDATE withdrawals SET status = $1, processed_at = NOW(), admin_note = $2 WHERE id = $3`,
+            [status, note || null, transferId]
+        );
+        if (status === 'failed') {
+            await client.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [transfer.amount, transfer.user_id]);
+        }
+        await client.query('COMMIT');
+        res.json({ ok: true });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: 'Transfer update failed' });
+    } finally { client.release(); }
+});
+
+app.get('/api/admin/transfers', async (req, res) => {
+    if (req.query.adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const { rows } = await pool.query('SELECT * FROM withdrawals ORDER BY requested_at DESC');
+        res.json(rows.map(r => ({
+            id: r.id, userId: r.user_id, amount: r.amount, bankName: r.bank_name,
+            accountNumber: r.account_number, status: r.status, requestedAt: r.requested_at,
+            processedAt: r.processed_at, adminNote: r.admin_note
+        })));
+    } catch { res.status(500).json({ error: 'Failed to load transfers' }); }
+});
+
+app.post('/api/admin/videos', async (req, res) => {
+    const { adminKey, url, title } = req.body;
+    if (adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
+    if (!url) return res.status(400).json({ error: 'URL required' });
+    try {
+        const { rows } = await pool.query(
+            `INSERT INTO videos (url, title) VALUES ($1, $2) RETURNING *`,
+            [url, title || null]
+        );
+        res.json(rows[0]);
+    } catch { res.status(500).json({ error: 'Failed to add video' }); }
+});
+
+app.get('/api/admin/videos', async (req, res) => {
+    if (req.query.adminKey !== process.env.ADMIN_KEY) return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const { rows } = await pool.query('SELECT * FROM videos ORDER BY id DESC');
+        res.json(rows);
+    } catch { res.status(500).json({ error: 'Failed to load videos' }); }
+});
+
+// Admin: retry stuck transfer
 app.post('/api/admin/panel/retry-transfer/:id', requireAdmin, async (req, res) => {
     try {
         const { rows } = await pool.query('SELECT * FROM withdrawals WHERE id = $1', [req.params.id]);
@@ -1478,7 +1713,6 @@ app.post('/api/admin/panel/retry-transfer/:id', requireAdmin, async (req, res) =
         if (!w) return res.status(404).json({ error: 'Not found' });
         if (w.status === 'paid') return res.status(400).json({ error: 'Already paid' });
 
-        // Initiate via Flutterwave
         const reference = `MNG-TRF-${w.user_id}-${Date.now()}`;
         const result = await flwInitiateTransfer({
             accountBank: w.bank_code,
@@ -1520,7 +1754,6 @@ async function start() {
             console.log(`Cooldown: ${TASK_COOLDOWN_SECONDS}s`);
             console.log(`Referral: ₦${REFERRAL_BONUS_REFERRER} / ₦${REFERRAL_BONUS_NEW_USER}`);
             console.log(`Streak: ${STREAK_TARGET_DAYS} days → ₦${STREAK_BONUS_NGN.toLocaleString()}`);
-            console.log(`Flutterwave: ${process.env.FLW_SECRET_KEY ? (process.env.FLW_SECRET_KEY.startsWith('FLWSECK_TEST') ? 'TEST MODE' : 'LIVE') : 'NOT CONFIGURED'}`);
             console.log(`Window currently: ${isTransferWindowOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
         });
     } catch (err) {
