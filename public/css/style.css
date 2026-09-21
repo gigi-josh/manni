@@ -364,8 +364,6 @@ textarea {
 }
 
 /* ================= AD SLOTS (Additional zones) ================= */
-
-/* 728x90 leaderboard — desktop */
 .ad-slot-leaderboard {
     display: flex;
     justify-content: center;
@@ -376,7 +374,6 @@ textarea {
     min-height: 90px;
 }
 
-/* 468x60 medium banner */
 .ad-slot-medium {
     display: flex;
     justify-content: center;
@@ -387,18 +384,16 @@ textarea {
     min-height: 60px;
 }
 
-/* 160x600 skyscraper — desktop, absolute-positioned right */
 .ad-slot-skyscraper {
     display: none;
-    position: absolute;
-    right: 20px;
-    top: 100px;
+    position: fixed;
+    right: 12px;
+    top: 120px;
     width: 160px;
     min-height: 600px;
-    z-index: 5;
+    z-index: 4;
 }
 
-/* 160x300 half skyscraper — desktop */
 .ad-slot-half-skyscraper {
     display: none;
     justify-content: center;
@@ -408,7 +403,6 @@ textarea {
     min-height: 300px;
 }
 
-/* 320x50 mobile sticky bar */
 .ad-slot-mobile-sticky {
     display: none;
     position: fixed;
@@ -424,7 +418,6 @@ textarea {
     min-height: 60px;
 }
 
-/* Survey page top ad wrapper */
 .survey-top-ad {
     margin: 12px auto 0;
     padding: 0 20px;
@@ -530,25 +523,6 @@ textarea {
     padding: 24px 16px 130px;
     background: linear-gradient(135deg, var(--primary-light) 0%, #FFE8D6 100%);
 }
-/* Auth page in-block ad */
-.auth-ad-slot {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin: 0 auto 24px;
-    max-width: 300px;
-    min-height: 250px;
-    background: var(--bg-light);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-}
-
-@media (max-width: 640px) {
-    .auth-ad-slot {
-        margin-bottom: 18px;
-        min-height: 220px;
-    }
-}
 
 .auth-card {
     background: var(--white);
@@ -561,7 +535,7 @@ textarea {
 
 .auth-header {
     text-align: center;
-    margin-bottom: 26px;
+    margin-bottom: 22px;
 }
 
 .auth-header h1 {
@@ -573,6 +547,18 @@ textarea {
 .auth-header p {
     color: var(--accent);
     font-size: 0.95rem;
+}
+
+.auth-ad-slot {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0 auto 24px;
+    max-width: 300px;
+    min-height: 250px;
+    background: var(--bg-light);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
 }
 
 .auth-footer {
@@ -608,8 +594,9 @@ textarea {
 .announcement-banner .container {
     display: flex;
     align-items: center;
-    gap: 14px;
-    padding-right: 40px;
+    gap: 12px;
+    padding-right: 44px;
+    position: relative;
 }
 
 .announcement-banner i.fa-bullhorn {
@@ -638,7 +625,7 @@ textarea {
 
 .announcement-banner button {
     position: absolute;
-    right: 16px;
+    right: 8px;
     top: 50%;
     transform: translateY(-50%);
     background: transparent;
@@ -648,8 +635,13 @@ textarea {
     padding: 6px 10px;
     border-radius: 6px;
     cursor: pointer;
-    opacity: 0.8;
+    opacity: 0.85;
     transition: background 0.2s, opacity 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    min-height: 32px;
 }
 
 .announcement-banner button:hover {
@@ -791,43 +783,43 @@ textarea {
 
 /* ================= DASHBOARD ================= */
 .dashboard {
-    padding: 32px 0 60px;
+    padding: 24px 0 60px;
     position: relative;
 }
 
 .dashboard-header {
-    margin-bottom: 28px;
+    margin-bottom: 20px;
 }
 
 .dashboard-header h1 {
-    font-size: clamp(1.5rem, 3vw, 2rem);
+    font-size: clamp(1.4rem, 3vw, 1.9rem);
     font-weight: 700;
-    margin-bottom: 6px;
+    margin-bottom: 14px;
 }
 
 .dashboard-stats {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
 }
 
 .stat-card {
     background: var(--white);
-    padding: 18px 20px;
+    padding: 16px 18px;
     border-radius: var(--radius);
     box-shadow: var(--shadow-sm);
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
     min-width: 0;
 }
 
 .stat-card i {
-    font-size: 1.6rem;
+    font-size: 1.5rem;
     color: var(--primary);
     flex-shrink: 0;
-    width: 40px;
-    height: 40px;
+    width: 38px;
+    height: 38px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -843,34 +835,36 @@ textarea {
 }
 
 .stat-card .stat-label {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
     color: var(--accent);
-    font-weight: 500;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.4px;
+    margin-bottom: 2px;
 }
 
 .stat-card .stat-value {
-    font-size: 1.25rem;
+    font-size: 1.1rem;
     font-weight: 700;
     color: var(--secondary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    line-height: 1.2;
 }
 
 /* ================= DASHBOARD CONTENT ================= */
 .dashboard-content {
     display: grid;
     grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-    gap: 24px;
-    margin-top: 28px;
+    gap: 22px;
+    margin-top: 22px;
 }
 
 .tasks-section,
 .withdraw-section {
     background: var(--white);
-    padding: 24px;
+    padding: 22px;
     border-radius: var(--radius);
     box-shadow: var(--shadow-sm);
     min-width: 0;
@@ -878,15 +872,142 @@ textarea {
 
 .tasks-section h2,
 .withdraw-section h2 {
-    font-size: 1.2rem;
+    font-size: 1.15rem;
     font-weight: 700;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
 }
 
 .withdraw-section h3 {
     font-size: 1rem;
     font-weight: 700;
-    margin-bottom: 12px;
+    margin: 22px 0 12px;
+}
+
+.withdraw-section .btn-full {
+    max-width: 100%;
+}
+
+.withdraw-section .transfer-rule-note {
+    margin-top: 12px;
+    font-size: 0.82rem;
+}
+
+/* ================= REFERRAL WIDGET ================= */
+.referral-widget {
+    background: var(--white);
+    padding: 22px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 22px;
+}
+
+.referral-widget h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.referral-sub {
+    color: var(--accent);
+    font-size: 0.86rem;
+    margin-bottom: 14px;
+}
+
+.referral-link-box {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.referral-link-box input {
+    flex: 1;
+    padding: 11px 14px;
+    border: 2px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    background: var(--bg-light);
+    font-family: 'Courier New', monospace;
+    color: var(--secondary);
+    min-width: 0;
+}
+
+.referral-link-box .btn {
+    flex-shrink: 0;
+    padding: 10px 14px;
+}
+
+.referral-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.referral-stats > div {
+    background: var(--primary-light);
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ref-stat-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.ref-stat-value {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: var(--primary);
+}
+
+.referral-share {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.referral-share .btn {
+    flex: 1;
+    min-width: 140px;
+    font-size: 0.84rem;
+}
+
+.referral-list-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    margin-top: 16px;
+    margin-bottom: 10px;
+    color: var(--secondary);
+}
+
+.referral-list {
+    display: grid;
+    gap: 8px;
+}
+
+.referral-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-light);
+    border-radius: var(--radius-sm);
+    font-size: 0.86rem;
+    flex-wrap: wrap;
+}
+
+.referral-status {
+    font-size: 0.76rem;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--success);
 }
 
 /* ================= TASK CARDS ================= */
@@ -939,7 +1060,7 @@ textarea {
 
 .task-title {
     font-weight: 700;
-    font-size: 1.02rem;
+    font-size: 1rem;
     color: var(--secondary);
     line-height: 1.3;
     word-break: break-word;
@@ -967,7 +1088,7 @@ textarea {
     background: #EBF8FF;
     color: #2B6CB0;
     border-radius: 20px;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-weight: 600;
 }
 
@@ -975,7 +1096,7 @@ textarea {
     display: inline-block;
     padding: 3px 10px;
     border-radius: 20px;
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     font-weight: 600;
 }
 
@@ -1006,7 +1127,7 @@ textarea {
 
 .task-description {
     color: var(--accent);
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     margin-bottom: 8px;
     word-break: break-word;
 }
@@ -1014,7 +1135,7 @@ textarea {
 .task-instructions {
     display: block;
     color: var(--accent);
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     font-style: italic;
     margin-bottom: 14px;
     word-break: break-word;
@@ -1035,7 +1156,7 @@ textarea {
 .task-link {
     color: var(--primary);
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     padding: 8px 12px;
     border-radius: var(--radius-sm);
     background: var(--primary-light);
@@ -1051,7 +1172,7 @@ textarea {
     color: var(--success);
     font-weight: 700;
     padding: 8px 12px;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
 }
 
 .task-pending {
@@ -1059,13 +1180,13 @@ textarea {
     color: #B7791F;
     font-weight: 700;
     padding: 8px 12px;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
 }
 
 .task-rejected-note {
     width: 100%;
     color: var(--danger);
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     font-style: italic;
     margin-bottom: 8px;
 }
@@ -1119,7 +1240,7 @@ textarea {
 .task-article small {
     display: block;
     color: var(--accent);
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     text-align: center;
 }
 
@@ -1153,7 +1274,7 @@ textarea {
 .task-survey small {
     display: block;
     color: var(--accent);
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     text-align: center;
 }
 
@@ -1165,7 +1286,7 @@ textarea {
     padding: 9px 12px;
     background: #EDF2F7;
     border-radius: var(--radius-sm);
-    font-size: 0.88rem;
+    font-size: 0.86rem;
     margin-bottom: 10px;
     width: 100%;
 }
@@ -1194,7 +1315,7 @@ textarea {
     background: var(--primary-light);
     border: 1px solid #FFD4B3;
     border-radius: var(--radius-sm);
-    margin-bottom: 16px;
+    margin-bottom: 14px;
     color: #8A4A00;
 }
 
@@ -1207,12 +1328,12 @@ textarea {
 .cooldown-banner strong {
     display: block;
     font-weight: 700;
-    font-size: 0.95rem;
+    font-size: 0.92rem;
     margin-bottom: 2px;
 }
 
 .cooldown-banner span {
-    font-size: 0.85rem;
+    font-size: 0.82rem;
     opacity: 0.9;
     font-variant-numeric: tabular-nums;
 }
@@ -1222,14 +1343,14 @@ textarea {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 20px;
+    gap: 18px;
     flex-wrap: wrap;
     background: linear-gradient(135deg, var(--primary) 0%, #FF8C42 100%);
     color: var(--white);
     padding: 20px 24px;
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    margin-bottom: 28px;
+    margin-bottom: 22px;
 }
 
 .survey-cta-content {
@@ -1246,13 +1367,13 @@ textarea {
 }
 
 .survey-cta-content h3 {
-    font-size: 1.15rem;
+    font-size: 1.1rem;
     font-weight: 700;
     margin-bottom: 2px;
 }
 
 .survey-cta-content p {
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     opacity: 0.9;
 }
 
@@ -1340,7 +1461,7 @@ textarea {
     padding: 16px 20px;
     border-radius: var(--radius);
     margin-bottom: 20px;
-    font-size: 0.95rem;
+    font-size: 0.94rem;
     box-shadow: var(--shadow-sm);
 }
 
@@ -1411,7 +1532,7 @@ textarea {
     padding: 24px;
     border-radius: var(--radius);
     box-shadow: var(--shadow-sm);
-    margin-bottom: 24px;
+    margin-bottom: 22px;
 }
 
 .transfer-history-card {
@@ -1422,7 +1543,7 @@ textarea {
 }
 
 .transfer-history-card h2 {
-    font-size: 1.2rem;
+    font-size: 1.15rem;
     font-weight: 700;
     margin-bottom: 16px;
 }
@@ -1482,12 +1603,12 @@ textarea {
 }
 
 .withdrawal-item strong {
-    font-size: 0.98rem;
+    font-size: 0.95rem;
 }
 
 .withdrawal-bank {
     display: block;
-    font-size: 0.78rem;
+    font-size: 0.76rem;
     color: var(--accent);
     margin-top: 3px;
 }
@@ -1495,7 +1616,7 @@ textarea {
 .withdrawal-status {
     padding: 4px 10px;
     border-radius: 12px;
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     font-weight: 700;
     text-transform: capitalize;
     white-space: nowrap;
@@ -1521,7 +1642,7 @@ textarea {
     color: var(--accent);
     text-align: center;
     padding: 20px;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
 }
 
 /* ================= AD PAGE ================= */
@@ -1744,7 +1865,25 @@ footer {
 }
 
 /* ================= RESPONSIVE ================= */
-@media (max-width: 900px) {
+@media (max-width: 1360px) {
+    .ad-slot-skyscraper {
+        display: none;
+    }
+}
+
+@media (min-width: 1361px) {
+    .ad-slot-skyscraper {
+        display: block;
+    }
+}
+
+@media (min-width: 1024px) and (max-width: 1360px) {
+    .ad-slot-half-skyscraper {
+        display: flex;
+    }
+}
+
+@media (max-width: 1024px) {
     .hero .container {
         grid-template-columns: 1fr;
         gap: 36px;
@@ -1762,6 +1901,10 @@ footer {
 
     .hero-stats {
         justify-content: center;
+    }
+
+    .dashboard-stats {
+        grid-template-columns: repeat(2, 1fr);
     }
 
     .dashboard-content {
@@ -1806,6 +1949,26 @@ footer {
         padding: 28px 0;
     }
 
+    .ad-slot-leaderboard {
+        display: none;
+    }
+
+    .ad-slot-skyscraper {
+        display: none;
+    }
+
+    .ad-slot-half-skyscraper {
+        display: none;
+    }
+
+    .ad-slot-mobile-sticky {
+        display: flex;
+    }
+
+    .survey-top-ad {
+        display: none;
+    }
+
     .auth-container {
         padding: 20px 14px 130px;
     }
@@ -1814,8 +1977,54 @@ footer {
         padding: 28px 20px;
     }
 
+    .auth-ad-slot {
+        margin-bottom: 18px;
+        min-height: 220px;
+    }
+
+    .dashboard {
+        padding: 20px 0 100px;
+    }
+
+    .dashboard-header h1 {
+        font-size: 1.4rem;
+        margin-bottom: 12px;
+    }
+
     .dashboard-stats {
-        grid-template-columns: 1fr;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+
+    .stat-card {
+        padding: 12px 14px;
+        gap: 10px;
+    }
+
+    .stat-card i {
+        width: 34px;
+        height: 34px;
+        font-size: 1.25rem;
+    }
+
+    .stat-card .stat-label {
+        font-size: 0.66rem;
+    }
+
+    .stat-card .stat-value {
+        font-size: 1rem;
+    }
+
+    .tasks-section,
+    .withdraw-section,
+    .referral-widget {
+        padding: 18px;
+    }
+
+    .tasks-section h2,
+    .withdraw-section h2 {
+        font-size: 1.05rem;
+        margin-bottom: 12px;
     }
 
     .task-actions {
@@ -1850,6 +2059,7 @@ footer {
         flex-direction: column;
         align-items: stretch;
         text-align: center;
+        padding: 18px 20px;
     }
 
     .survey-cta-content {
@@ -1906,21 +2116,9 @@ footer {
         padding: 18px;
     }
 
-    /* Ad slots on mobile */
-    .ad-slot-leaderboard { display: none; }
-    .ad-slot-skyscraper { display: none; }
-    .ad-slot-half-skyscraper { display: none; }
-    .ad-slot-mobile-sticky { display: flex; }
-
-    .dashboard,
-    .survey-body,
-    .transfer-history-card {
-        padding-bottom: 100px;
-    }
-
     .announcement-banner .container {
         gap: 10px;
-        padding-right: 36px;
+        padding-right: 40px;
     }
 
     .announcement-banner i.fa-bullhorn {
@@ -1928,22 +2126,24 @@ footer {
     }
 
     .announcement-banner strong {
-        font-size: 0.88rem;
+        font-size: 0.86rem;
     }
 
     .announcement-banner span {
-        font-size: 0.78rem;
+        font-size: 0.76rem;
     }
 
-    .survey-top-ad {
-        display: none;
+    .referral-share .btn {
+        width: 100%;
     }
-}
 
-@media (min-width: 1024px) {
-    .ad-slot-skyscraper { display: block; }
-    .ad-slot-half-skyscraper { display: flex; }
-    .ad-slot-mobile-sticky { display: none; }
+    .referral-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .referral-link-box {
+        flex-direction: column;
+    }
 }
 
 @media (max-width: 420px) {
@@ -1966,6 +2166,10 @@ footer {
 
     .stat-card .stat-value {
         font-size: 1.1rem;
+    }
+
+    .dashboard-stats {
+        grid-template-columns: 1fr;
     }
 
     .modal-card,
