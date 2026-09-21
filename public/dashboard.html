@@ -25,6 +25,20 @@
         </div>
     </nav>
 
+    <!-- Announcement banner -->
+    <div class="announcement-banner" id="announcementBanner">
+        <div class="container">
+            <i class="fas fa-bullhorn"></i>
+            <div>
+                <strong>Transfers go live next month.</strong>
+                <span>Keep earning — we pay on the 1st of every month.</span>
+            </div>
+            <button onclick="document.getElementById('announcementBanner').remove()" aria-label="Close">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    </div>
+
     <div class="dashboard">
         <div class="container">
 
@@ -54,21 +68,24 @@
                         </div>
                     </div>
                     <div class="stat-card">
+                        <i class="fas fa-fire" style="color: #FF6B00;"></i>
+                        <div>
+                            <span class="stat-label">Daily Streak</span>
+                            <span class="stat-value"><span id="streakCount">0</span>/30</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
                         <i class="fas fa-share-alt"></i>
                         <div>
                             <span class="stat-label">Referral Code</span>
                             <span class="stat-value" id="referralCode">-</span>
                         </div>
                     </div>
-          <div class="stat-card">
-    <i class="fas fa-fire" style="color: #FF6B00;"></i>
-    <div>
-        <span class="stat-label">Daily Streak</span>
-        <span class="stat-value"><span id="streakCount">0</span>/30</span>
-    </div>
-</div>
                 </div>
             </div>
+
+            <!-- Referral widget -->
+            <div id="referralWidget"></div>
 
             <!-- Survey CTA -->
             <div class="survey-cta">
@@ -94,8 +111,7 @@
                         <p class="empty-state">Loading tasks…</p>
                     </div>
                 </div>
-    
-               <div id="referralWidget"></div>
+
                 <!-- Transfer -->
                 <div class="withdraw-section">
                     <h2>Transfer to Bank</h2>
