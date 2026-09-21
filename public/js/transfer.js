@@ -96,7 +96,7 @@ async function loadWindowStatus() {
         if (data.open) {
             banner.classList.add('window-open');
             banner.classList.remove('window-closed');
-            statusText.textContent = 'Transfers will open on the 1st';
+            statusText.textContent = 'Transfers will open on the 1st. Starting 1st November.';
             subText.textContent = `You can transfer until the ${data.windowEndDay}th of this month. Minimum ₦${data.minTransfer.toLocaleString()}.`;
             if (transferBtn) transferBtn.disabled = false;
         } else {
