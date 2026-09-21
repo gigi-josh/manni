@@ -530,6 +530,25 @@ textarea {
     padding: 24px 16px 130px;
     background: linear-gradient(135deg, var(--primary-light) 0%, #FFE8D6 100%);
 }
+/* Auth page in-block ad */
+.auth-ad-slot {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0 auto 24px;
+    max-width: 300px;
+    min-height: 250px;
+    background: var(--bg-light);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+@media (max-width: 640px) {
+    .auth-ad-slot {
+        margin-bottom: 18px;
+        min-height: 220px;
+    }
+}
 
 .auth-card {
     background: var(--white);
