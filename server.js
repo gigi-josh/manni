@@ -85,6 +85,7 @@ function sanitizeUser(user) {
         referralCode: user.referral_code,
         referralEarnings: user.referral_earnings,
         referralCount: user.referral_count,
+        pendingReferralBonus: user.pending_referral_bonus || 0,
         streakCount: user.streak_count || 0,
         streakTarget: STREAK_TARGET_DAYS,
         streakBonus: STREAK_BONUS_NGN,
@@ -245,6 +246,8 @@ async function initDb() {
                 referral_code_used VARCHAR(20),
                 referral_earnings INTEGER DEFAULT 0,
                 referral_count INTEGER DEFAULT 0,
+                pending_referral_bonus INTEGER DEFAULT 0,
+                referral_bonus_paid BOOLEAN DEFAULT FALSE,
                 streak_count INTEGER DEFAULT 0,
                 last_task_date DATE,
                 created_at TIMESTAMP DEFAULT NOW()
@@ -367,11 +370,13 @@ async function initDb() {
             CREATE INDEX IF NOT EXISTS idx_task_progress_article ON task_progress(current_article_id);
         `);
 
-        // Safe migrations (plain ALTER TABLE, idempotent)
+        // Safe migrations (idempotent)
         const migrations = [
             `ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)`,
             `ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_count INTEGER DEFAULT 0`,
             `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_task_date DATE`,
+            `ALTER TABLE users ADD COLUMN IF NOT EXISTS pending_referral_bonus INTEGER DEFAULT 0`,
+            `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_bonus_paid BOOLEAN DEFAULT FALSE`,
             `ALTER TABLE users ALTER COLUMN email DROP NOT NULL`,
             `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS repeatable BOOLEAN DEFAULT FALSE`,
             `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS renew_after_days INTEGER`,
@@ -392,14 +397,14 @@ async function initDb() {
             }
         }
 
-        // Renewal rules
+        // Renewal rules per task
         await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Watch Video'`);
         await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Read Article'`);
         await pool.query(`UPDATE tasks SET repeatable = TRUE,  renew_after_days = NULL WHERE title = 'Social Media Post'`);
         await pool.query(`UPDATE tasks SET repeatable = FALSE, renew_after_days = 3    WHERE title = 'Complete Survey'`);
         await pool.query(`UPDATE tasks SET repeatable = FALSE, renew_after_days = NULL WHERE title = 'Download App'`);
 
-        // Convert Read Article to 'article' verification
+        // Convert Read Article to article verification
         await pool.query(`UPDATE tasks SET verification = 'article', link = NULL WHERE title = 'Read Article'`);
 
         // Reset completed tasks if applicable
@@ -445,7 +450,7 @@ async function initDb() {
             console.log('✅ Seeded default videos');
         }
 
-        // Seed articles (2 starter articles)
+        // Seed articles
         const art = await pool.query('SELECT COUNT(*)::int AS count FROM articles');
         if (art.rows[0].count === 0) {
             await pool.query(`
@@ -519,6 +524,7 @@ app.post('/api/register', async (req, res) => {
             }
         }
 
+        // Resolve referrer
         let referrer = null, referralApplied = false, refCodeUsed = null;
         if (ref && typeof ref === 'string') {
             const code = ref.trim().toUpperCase();
@@ -531,13 +537,14 @@ app.post('/api/register', async (req, res) => {
         const newReferralCode = `MNG${Date.now().toString(36).toUpperCase()}`;
 
         const insert = await client.query(
-            `INSERT INTO users (username, email, phone, password, balance, referral_code, referred_by, referral_code_used)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+            `INSERT INTO users (username, email, phone, password, balance, referral_code, referred_by, referral_code_used, referral_bonus_paid)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE) RETURNING *`,
             [username, email, phone, hashedPassword, signupBonus, newReferralCode,
              referrer ? referrer.id : null, refCodeUsed]
         );
         const newUser = insert.rows[0];
 
+        // Initialize task progress
         const allTasks = await client.query('SELECT id FROM tasks WHERE active = TRUE');
         for (const t of allTasks.rows) {
             await client.query(
@@ -547,14 +554,15 @@ app.post('/api/register', async (req, res) => {
             );
         }
 
+        // ---- Referrer: mark pending instead of paying ----
+        // Referrer earns ₦550 only after new user completes first task
         if (referrer) {
             await client.query(
-                `UPDATE users SET balance = balance + $1,
-                                  referral_earnings = referral_earnings + $1,
-                                  referral_count = referral_count + 1
+                `UPDATE users SET pending_referral_bonus = COALESCE(pending_referral_bonus, 0) + $1
                  WHERE id = $2`,
                 [REFERRAL_BONUS_REFERRER, referrer.id]
             );
+            console.log(`Referral pending: ₦${REFERRAL_BONUS_REFERRER} for ${referrer.username} (waiting on ${newUser.username} first task)`);
         }
 
         await client.query('COMMIT');
@@ -605,7 +613,11 @@ app.get('/api/referrals/:userId', async (req, res) => {
         if (!user) return res.status(404).json({ error: 'User not found' });
 
         const { rows: referred } = await pool.query(
-            'SELECT id, username, created_at FROM users WHERE referred_by = $1 ORDER BY created_at DESC',
+            `SELECT u.id, u.username, u.created_at,
+                    (SELECT COUNT(*)::int FROM task_completions tc WHERE tc.user_id = u.id) AS task_count
+             FROM users u
+             WHERE u.referred_by = $1
+             ORDER BY u.created_at DESC`,
             [userId]
         );
 
@@ -614,10 +626,14 @@ app.get('/api/referrals/:userId', async (req, res) => {
             referralLink: `https://manni.onrender.com/register?ref=${user.referral_code}`,
             referralCount: user.referral_count || 0,
             referralEarnings: user.referral_earnings || 0,
+            pendingReferralBonus: user.pending_referral_bonus || 0,
             bonusReferrer: REFERRAL_BONUS_REFERRER,
             bonusNewUser: REFERRAL_BONUS_NEW_USER,
             referrals: referred.map(u => ({
-                username: u.username, joinedAt: u.created_at, earned: REFERRAL_BONUS_REFERRER
+                username: u.username,
+                joinedAt: u.created_at,
+                earned: u.task_count > 0 ? REFERRAL_BONUS_REFERRER : 0,
+                pending: u.task_count === 0
             }))
         });
     } catch { res.status(500).json({ error: 'Failed to load referrals' }); }
@@ -636,7 +652,6 @@ app.get('/api/tasks/:userId', async (req, res) => {
         const progressMap = {};
         progressRows.forEach(p => { progressMap[p.task_id] = p; });
 
-        // Load current videos for started tasks
         const videoIds = progressRows.filter(p => p.current_video_id).map(p => p.current_video_id);
         let videoMap = {};
         if (videoIds.length) {
@@ -646,7 +661,6 @@ app.get('/api/tasks/:userId', async (req, res) => {
             vids.forEach(v => { videoMap[v.id] = v; });
         }
 
-        // Load current articles for started tasks
         const articleIds = progressRows.filter(p => p.current_article_id).map(p => p.current_article_id);
         let articleMap = {};
         if (articleIds.length) {
@@ -766,22 +780,16 @@ app.post('/api/tasks/start', async (req, res) => {
             });
         }
 
-        // Pick a video for video tasks
         let video = null;
         if (task.verification === 'video') {
             video = await pickRandomVideoForUser(userId);
-            if (!video) {
-                return res.status(503).json({ error: 'No videos available right now. Try again later.' });
-            }
+            if (!video) return res.status(503).json({ error: 'No videos available right now. Try again later.' });
         }
 
-        // Pick an article for article tasks
         let article = null;
         if (task.verification === 'article') {
             article = await pickRandomArticleForUser(userId);
-            if (!article) {
-                return res.status(503).json({ error: 'No articles available right now. Try again later.' });
-            }
+            if (!article) return res.status(503).json({ error: 'No articles available right now. Try again later.' });
         }
 
         const update = await pool.query(
@@ -854,7 +862,6 @@ app.post('/api/tasks/complete', async (req, res) => {
             }
         }
 
-        // ---- Resolve video for video tasks ----
         let usedVideoId = null;
         if (task.verification === 'video') {
             let vid = null;
@@ -887,7 +894,6 @@ app.post('/api/tasks/complete', async (req, res) => {
             );
         }
 
-        // ---- Resolve article for article tasks ----
         let usedArticleId = null;
         if (task.verification === 'article') {
             let aid = null;
@@ -945,7 +951,7 @@ app.post('/api/tasks/complete', async (req, res) => {
             [userId, taskId, task.reward, usedVideoId]
         );
 
-        // Streak
+        // Streak update
         const today = nigeriaDateString(0);
         const yesterday = nigeriaDateString(-1);
         const lastDate = user.last_task_date
@@ -1004,6 +1010,37 @@ app.post('/api/tasks/complete', async (req, res) => {
             `UPDATE users SET balance = balance + $1, tasks_completed = tasks_completed + 1 WHERE id = $2 RETURNING balance`,
             [totalCredit, userId]
         );
+
+        // ---- NEW: Referral bonus release on first task ----
+        // If this user was referred, and the referrer's bonus is still pending, release it now
+        if (user.referred_by && !user.referral_bonus_paid) {
+            const referrerRes = await client.query(
+                'SELECT * FROM users WHERE id = $1',
+                [user.referred_by]
+            );
+            const referrer = referrerRes.rows[0];
+
+            if (referrer) {
+                // Mark this user's referral as paid
+                await client.query(
+                    `UPDATE users SET referral_bonus_paid = TRUE WHERE id = $1`,
+                    [userId]
+                );
+
+                // Release referrer's pending bonus to their balance
+                await client.query(
+                    `UPDATE users
+                     SET balance = balance + $1,
+                         pending_referral_bonus = GREATEST(0, COALESCE(pending_referral_bonus, 0) - $1),
+                         referral_earnings = COALESCE(referral_earnings, 0) + $1,
+                         referral_count = COALESCE(referral_count, 0) + 1
+                     WHERE id = $2`,
+                    [REFERRAL_BONUS_REFERRER, referrer.id]
+                );
+
+                console.log(`✅ Referral released: ₦${REFERRAL_BONUS_REFERRER} to ${referrer.username} (from ${user.username} first task)`);
+            }
+        }
 
         await client.query('COMMIT');
 
@@ -1093,7 +1130,6 @@ app.post('/api/withdraw', async (req, res) => {
         if (!bankName || !bankCode) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Bank selection required' }); }
         if (!/^\d{10}$/.test(accountNumber)) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'Account number must be 10 digits' }); }
 
-        // Reserve balance
         await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [amt, userId]);
 
         const reference = `MNG-TRF-${userId}-${Date.now()}`;
@@ -1105,10 +1141,8 @@ app.post('/api/withdraw', async (req, res) => {
         const withdrawalId = ins.rows[0].id;
 
         await client.query('DELETE FROM withdraw_starts WHERE user_id = $1', [userId]);
-
         await client.query('COMMIT');
 
-        // ---- Flutterwave call (outside transaction) ----
         try {
             const result = await flwInitiateTransfer({
                 accountBank: bankCode,
@@ -1140,7 +1174,6 @@ app.post('/api/withdraw', async (req, res) => {
                 `UPDATE withdrawals SET status = 'failed', admin_note = $1, processed_at = NOW() WHERE id = $2`,
                 [`Auto-failed: ${flwErr.message}`, withdrawalId]
             );
-
             const balAfter = await pool.query('SELECT balance FROM users WHERE id = $1', [userId]);
 
             return res.status(502).json({
@@ -1258,10 +1291,19 @@ app.all('/api/cpx-webhook', async (req, res) => {
 
     if (!trans_id || !user_id) return res.status(400).json({ error: 'Missing trans_id or user_id' });
 
+    // Try multiple hash formats (CPX docs are inconsistent)
     if (process.env.CPX_SECURE_HASH && hash) {
-        const wd = crypto.createHash('md5').update(`${trans_id}-${process.env.CPX_SECURE_HASH}`).digest('hex');
-        const nd = crypto.createHash('md5').update(`${trans_id}${process.env.CPX_SECURE_HASH}`).digest('hex');
-        if (hash !== wd && hash !== nd) return res.status(403).json({ error: 'Invalid hash' });
+        const candidates = [
+            crypto.createHash('md5').update(`${trans_id}-${process.env.CPX_SECURE_HASH}`).digest('hex'),
+            crypto.createHash('md5').update(`${trans_id}${process.env.CPX_SECURE_HASH}`).digest('hex'),
+            crypto.createHash('md5').update(`${trans_id}${process.env.CPX_SECURE_HASH}${amount_local}${user_id}`).digest('hex'),
+            crypto.createHash('md5').update(`${trans_id}-${process.env.CPX_SECURE_HASH}-${amount_local}-${user_id}`).digest('hex')
+        ];
+        if (!candidates.includes(hash)) {
+            console.warn('CPX webhook: hash mismatch. Received:', hash);
+            console.warn('Tried:', candidates);
+            return res.status(403).json({ error: 'Invalid hash' });
+        }
     }
 
     const client = await pool.connect();
@@ -1335,13 +1377,15 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
             pool.query(`SELECT COUNT(*)::int AS c FROM task_progress WHERE status = 'pending'`)
         ]);
         const bal = await pool.query('SELECT COALESCE(SUM(balance),0)::int AS total FROM users');
+        const pendingRef = await pool.query('SELECT COALESCE(SUM(pending_referral_bonus),0)::int AS total FROM users');
 
         res.json({
             users: users.rows[0].c,
             activeTasks: tasks.rows[0].c,
             withdrawals: withdrawals.rows[0].c,
             pendingReviews: pending.rows[0].c,
-            totalBalances: bal.rows[0].total
+            totalBalances: bal.rows[0].total,
+            pendingReferralBonuses: pendingRef.rows[0].total
         });
     } catch (err) {
         res.status(500).json({ error: 'Failed to load stats' });
@@ -1357,7 +1401,7 @@ app.get('/api/admin/panel/users', requireAdmin, async (req, res) => {
 
 app.patch('/api/admin/panel/users/:id', requireAdmin, async (req, res) => {
     const { id } = req.params;
-    const { balance, pending_balance, tasks_completed, username, streak_count, last_task_date } = req.body;
+    const { balance, pending_balance, tasks_completed, username, streak_count, last_task_date, pending_referral_bonus } = req.body;
 
     const fields = [];
     const values = [];
@@ -1368,6 +1412,7 @@ app.patch('/api/admin/panel/users/:id', requireAdmin, async (req, res) => {
     if (typeof tasks_completed === 'number') { fields.push(`tasks_completed = $${i++}`); values.push(tasks_completed); }
     if (typeof username === 'string' && username.length >= 3) { fields.push(`username = $${i++}`); values.push(username); }
     if (typeof streak_count === 'number') { fields.push(`streak_count = $${i++}`); values.push(streak_count); }
+    if (typeof pending_referral_bonus === 'number') { fields.push(`pending_referral_bonus = $${i++}`); values.push(pending_referral_bonus); }
     if (last_task_date === null || typeof last_task_date === 'string') { fields.push(`last_task_date = $${i++}`); values.push(last_task_date); }
 
     if (!fields.length) return res.status(400).json({ error: 'No valid fields to update' });
@@ -1462,8 +1507,6 @@ app.delete('/api/admin/panel/videos/:id', requireAdmin, async (req, res) => {
         res.json({ ok: true });
     } catch { res.status(500).json({ error: 'Failed to delete video' }); }
 });
-
-// ==================== ADMIN: ARTICLES ====================
 
 app.get('/api/admin/panel/articles', requireAdmin, async (req, res) => {
     try {
@@ -1612,6 +1655,24 @@ app.post('/api/admin/review', async (req, res) => {
                 [totalCredit, newStreak, today, userId]
             );
 
+            // Release referral bonus if applicable
+            if (u.referred_by && !u.referral_bonus_paid) {
+                const refRes = await client.query('SELECT * FROM users WHERE id = $1', [u.referred_by]);
+                const referrer = refRes.rows[0];
+                if (referrer) {
+                    await client.query(`UPDATE users SET referral_bonus_paid = TRUE WHERE id = $1`, [userId]);
+                    await client.query(
+                        `UPDATE users SET balance = balance + $1,
+                                          pending_referral_bonus = GREATEST(0, COALESCE(pending_referral_bonus, 0) - $1),
+                                          referral_earnings = COALESCE(referral_earnings, 0) + $1,
+                                          referral_count = COALESCE(referral_count, 0) + 1
+                         WHERE id = $2`,
+                        [REFERRAL_BONUS_REFERRER, referrer.id]
+                    );
+                    console.log(`✅ Referral released (admin approve): ₦${REFERRAL_BONUS_REFERRER} to ${referrer.username}`);
+                }
+            }
+
             await client.query('COMMIT');
             return res.json({
                 message: 'Approved', userId, taskId, reward: task.reward,
@@ -1705,7 +1766,6 @@ app.get('/api/admin/videos', async (req, res) => {
     } catch { res.status(500).json({ error: 'Failed to load videos' }); }
 });
 
-// Admin: retry stuck transfer
 app.post('/api/admin/panel/retry-transfer/:id', requireAdmin, async (req, res) => {
     try {
         const { rows } = await pool.query('SELECT * FROM withdrawals WHERE id = $1', [req.params.id]);
@@ -1752,7 +1812,7 @@ async function start() {
             console.log(`Transfer window: day ${TRANSFER_WINDOW_START_DAY}–${TRANSFER_WINDOW_END_DAY}`);
             console.log(`Min transfer: ₦${MIN_TRANSFER.toLocaleString()}`);
             console.log(`Cooldown: ${TASK_COOLDOWN_SECONDS}s`);
-            console.log(`Referral: ₦${REFERRAL_BONUS_REFERRER} / ₦${REFERRAL_BONUS_NEW_USER}`);
+            console.log(`Referral: ₦${REFERRAL_BONUS_REFERRER} (referrer, on first task) / ₦${REFERRAL_BONUS_NEW_USER} (new user, immediate)`);
             console.log(`Streak: ${STREAK_TARGET_DAYS} days → ₦${STREAK_BONUS_NGN.toLocaleString()}`);
             console.log(`Window currently: ${isTransferWindowOpen() ? 'OPEN ✅' : 'CLOSED ❌'}`);
         });
