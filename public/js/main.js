@@ -227,7 +227,7 @@ async function loadReferralWidget() {
         container.innerHTML = `
             <div class="referral-widget">
                 <h3>Invite Friends, Earn ₦${data.bonusReferrer} Each</h3>
-                <p class="referral-sub">Share your link. When they sign up, you get ₦${data.bonusReferrer} — they get ₦${data.bonusNewUser} instantly.</p>
+                <p class="referral-sub">Share your link. You get ₦${data.bonusReferrer} when your friend completes their first task — they get ₦${data.bonusNewUser} instantly.</p>
 
                 <div class="referral-link-box">
                     <input type="text" id="referralLinkInput" readonly value="${escapeAttr(data.referralLink)}">
@@ -245,6 +245,13 @@ async function loadReferralWidget() {
                         <span class="ref-stat-label">Earned</span>
                         <span class="ref-stat-value">₦${(data.referralEarnings || 0).toLocaleString()}</span>
                     </div>
+                    ${data.pendingReferralBonus > 0 ? `
+                        <div style="grid-column: 1 / -1; background: var(--warning-light); border: 1px solid #F6E05E;">
+                            <span class="ref-stat-label" style="color: #744210;">⏳ Pending Bonus</span>
+                            <span class="ref-stat-value" style="color: #B7791F;">₦${data.pendingReferralBonus.toLocaleString()}</span>
+                            <small style="display: block; color: #744210; font-size: 0.75rem; margin-top: 4px;">Released when your referral completes their first task</small>
+                        </div>
+                    ` : ''}
                 </div>
 
                 <div class="referral-share">
@@ -262,7 +269,9 @@ async function loadReferralWidget() {
                         ${data.referrals.map(r => `
                             <div class="referral-item">
                                 <span>${escapeHtml(r.username)}</span>
-                                <span class="referral-status status-paid">✅ Earned ₦${r.earned}</span>
+                                <span class="referral-status ${r.pending ? 'status-pending' : 'status-paid'}">
+                                    ${r.pending ? '⏳ Pending first task' : `✅ Earned ₦${r.earned}`}
+                                </span>
                             </div>
                         `).join('')}
                     </div>
